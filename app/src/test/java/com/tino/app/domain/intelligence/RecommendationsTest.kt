@@ -43,6 +43,21 @@ class RecommendationsTest {
         assertTrue(repository.operationalMutations == 0)
     }
 
+    @Test
+    fun outcomeMetricsKeepEvaluationSignalsSeparateFromDecisionState() {
+        val metrics = RecommendationOutcomeMetrics(
+            counts = mapOf(
+                RecommendationOutcome.SHOWN to 3,
+                RecommendationOutcome.ACCEPTED to 1,
+                RecommendationOutcome.REJECTED to 2,
+            ),
+        )
+
+        assertEquals(3, metrics.count(RecommendationOutcome.SHOWN))
+        assertEquals(1, metrics.count(RecommendationOutcome.ACCEPTED))
+        assertEquals(0, metrics.count(RecommendationOutcome.FALSE_POSITIVE))
+    }
+
     private class RecordingRecommendationRepository : RecommendationRepository {
         var updatedId: String? = null
         var updatedDecision: RecommendationDecision? = null
@@ -56,5 +71,13 @@ class RecommendationsTest {
             updatedDecision = decision
             return null
         }
+
+        override suspend fun recordOutcome(
+            recommendationId: String,
+            outcome: RecommendationOutcome,
+            occurredAt: java.time.Instant,
+        ) = Unit
+
+        override fun observeOutcomeMetrics() = emptyFlow<RecommendationOutcomeMetrics>()
     }
 }

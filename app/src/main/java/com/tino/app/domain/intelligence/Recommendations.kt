@@ -9,6 +9,14 @@ import javax.inject.Singleton
 
 enum class RecommendationType { STOCKOUT, REPLENISHMENT, SLOW_MOVING, RECURRENCE }
 enum class RecommendationDecision { PENDING, ACCEPTED, REJECTED }
+enum class RecommendationOutcome {
+    SHOWN,
+    ACCEPTED,
+    REJECTED,
+    EXPIRED,
+    STOCKOUT_AFTER_RECOMMENDATION,
+    FALSE_POSITIVE,
+}
 
 data class InventorySignal(
     val productId: String,
@@ -35,6 +43,12 @@ data class Recommendation(
     val evidence: RecommendationEvidence? = null,
 )
 
+data class RecommendationOutcomeMetrics(
+    val counts: Map<RecommendationOutcome, Int> = emptyMap(),
+) {
+    fun count(outcome: RecommendationOutcome): Int = counts[outcome] ?: 0
+}
+
 interface RecommendationEngine {
     fun generate(signals: List<InventorySignal>): List<Recommendation>
 }
@@ -44,6 +58,12 @@ interface RecommendationRepository {
     suspend fun pending(): List<Recommendation>
     fun observePending(): Flow<List<Recommendation>>
     suspend fun updateDecision(id: String, decision: RecommendationDecision): Recommendation?
+    suspend fun recordOutcome(
+        recommendationId: String,
+        outcome: RecommendationOutcome,
+        occurredAt: Instant = Instant.now(),
+    )
+    fun observeOutcomeMetrics(): Flow<RecommendationOutcomeMetrics>
 }
 
 object NoOpRecommendationRepository : RecommendationRepository {
@@ -51,6 +71,12 @@ object NoOpRecommendationRepository : RecommendationRepository {
     override suspend fun pending(): List<Recommendation> = emptyList()
     override fun observePending(): Flow<List<Recommendation>> = emptyFlow()
     override suspend fun updateDecision(id: String, decision: RecommendationDecision): Recommendation? = null
+    override suspend fun recordOutcome(
+        recommendationId: String,
+        outcome: RecommendationOutcome,
+        occurredAt: Instant,
+    ) = Unit
+    override fun observeOutcomeMetrics(): Flow<RecommendationOutcomeMetrics> = emptyFlow()
 }
 
 @Singleton

@@ -23,6 +23,7 @@ import com.tino.app.domain.usecase.RegisterCreditPaymentUseCase
 import com.tino.app.domain.intelligence.PredictiveRecommendationService
 import com.tino.app.domain.intelligence.Recommendation
 import com.tino.app.domain.intelligence.RecommendationDecision
+import com.tino.app.domain.intelligence.RecommendationOutcome
 import com.tino.app.domain.intelligence.RecommendationRepository
 import com.tino.app.core.common.UuidV7
 import com.tino.app.core.database.StoreProfileEntity
@@ -142,7 +143,15 @@ class TinoViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            recommendationRepository.observePending().collect { _recommendations.value = it }
+            recommendationRepository.observePending().collect { pending ->
+                _recommendations.value = pending
+                pending.forEach { recommendation ->
+                    recommendationRepository.recordOutcome(
+                        recommendationId = recommendation.id,
+                        outcome = RecommendationOutcome.SHOWN,
+                    )
+                }
+            }
         }
         viewModelScope.launch {
             runCatching { predictiveRecommendations.generate(System.currentTimeMillis()) }
@@ -151,10 +160,14 @@ class TinoViewModel @Inject constructor(
 
     fun decideRecommendation(recommendation: Recommendation, accepted: Boolean) {
         viewModelScope.launch {
-            recommendationRepository.updateDecision(
+            val outcome = if (accepted) RecommendationOutcome.ACCEPTED else RecommendationOutcome.REJECTED
+            val updated = recommendationRepository.updateDecision(
                 recommendation.id,
                 if (accepted) RecommendationDecision.ACCEPTED else RecommendationDecision.REJECTED,
             )
+            if (updated != null) {
+                recommendationRepository.recordOutcome(recommendation.id, outcome)
+            }
         }
     }
 

@@ -59,8 +59,9 @@ class TinoConverters {
         MutationOperationEntity::class,
         BusinessMemoryEntity::class,
         RecommendationEntity::class,
+        RecommendationOutcomeEntity::class,
     ],
-    version = 18,
+    version = 19,
     exportSchema = true,
 )
 @TypeConverters(TinoConverters::class)
@@ -269,5 +270,15 @@ val MIGRATION_17_18 = object : Migration(17, 18) {
         database.execSQL("CREATE INDEX IF NOT EXISTS index_recommendations_productId ON recommendations(productId)")
         database.execSQL("CREATE INDEX IF NOT EXISTS index_recommendations_createdAtEpochMs ON recommendations(createdAtEpochMs)")
         database.execSQL("CREATE INDEX IF NOT EXISTS index_recommendations_decision ON recommendations(decision)")
+    }
+}
+
+val MIGRATION_18_19 = object : Migration(18, 19) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL(
+            "CREATE TABLE IF NOT EXISTS recommendation_outcomes (id TEXT NOT NULL PRIMARY KEY, recommendationId TEXT NOT NULL, outcome TEXT NOT NULL, occurredAtEpochMs INTEGER NOT NULL)",
+        )
+        database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_recommendation_outcomes_recommendationId_outcome ON recommendation_outcomes(recommendationId, outcome)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_recommendation_outcomes_occurredAtEpochMs ON recommendation_outcomes(occurredAtEpochMs)")
     }
 }

@@ -189,6 +189,17 @@ data class RecommendationEntity(
     val windowDays: Int?,
 )
 
+@Entity(
+    tableName = "recommendation_outcomes",
+    indices = [Index(value = ["recommendationId", "outcome"], unique = true), Index("occurredAtEpochMs")],
+)
+data class RecommendationOutcomeEntity(
+    @androidx.room.PrimaryKey val id: String,
+    val recommendationId: String,
+    val outcome: String,
+    val occurredAtEpochMs: Long,
+)
+
 @Entity(tableName = "sync_cursors")
 data class SyncCursorEntity(
     @androidx.room.PrimaryKey val scope: String,

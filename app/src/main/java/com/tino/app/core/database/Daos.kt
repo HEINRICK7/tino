@@ -29,6 +29,11 @@ data class OrderDetail(
     val items: List<OrderItemEntity>,
 )
 
+data class RecommendationOutcomeCountRow(
+    val outcome: String,
+    val count: Int,
+)
+
 @Dao
 interface ProductDao {
     @Query(
@@ -273,6 +278,12 @@ interface RecommendationDao {
 
     @Query("SELECT * FROM recommendations WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): RecommendationEntity?
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertOutcome(outcome: RecommendationOutcomeEntity): Long
+
+    @Query("SELECT outcome, COUNT(*) AS count FROM recommendation_outcomes GROUP BY outcome")
+    fun observeOutcomeCounts(): Flow<List<RecommendationOutcomeCountRow>>
 }
 
 @Dao

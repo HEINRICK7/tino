@@ -57,6 +57,7 @@ class RedactedAuditLogger @Inject constructor() : AuditLogger {
         "status",
         "sync_state",
         "recommendation_type",
+        "outcome",
         "entity_type",
         "match_strategy",
         "candidate_count",

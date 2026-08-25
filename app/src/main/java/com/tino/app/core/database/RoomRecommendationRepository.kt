@@ -5,6 +5,8 @@ import com.tino.app.core.observability.AuditLogger
 import com.tino.app.domain.intelligence.Recommendation
 import com.tino.app.domain.intelligence.RecommendationDecision
 import com.tino.app.domain.intelligence.RecommendationEvidence
+import com.tino.app.domain.intelligence.RecommendationOutcome
+import com.tino.app.domain.intelligence.RecommendationOutcomeMetrics
 import com.tino.app.domain.intelligence.RecommendationRepository
 import com.tino.app.domain.intelligence.RecommendationType
 import java.time.Instant
@@ -49,6 +51,38 @@ class RoomRecommendationRepository @Inject constructor(
                 ),
             )
         }
+    }
+
+    override suspend fun recordOutcome(
+        recommendationId: String,
+        outcome: RecommendationOutcome,
+        occurredAt: Instant,
+    ) {
+        val inserted = dao.insertOutcome(
+            RecommendationOutcomeEntity(
+                id = "${recommendationId}:${outcome.name}",
+                recommendationId = recommendationId,
+                outcome = outcome.name,
+                occurredAtEpochMs = occurredAt.toEpochMilli(),
+            ),
+        )
+        if (inserted != -1L) {
+            auditLogger.record(
+                AuditEventType.ML_RECOMMENDATION,
+                mapOf(
+                    "status" to "OUTCOME",
+                    "outcome" to outcome.name,
+                ),
+            )
+        }
+    }
+
+    override fun observeOutcomeMetrics() = dao.observeOutcomeCounts().map { rows ->
+        RecommendationOutcomeMetrics(
+            counts = rows.mapNotNull { row ->
+                runCatching { RecommendationOutcome.valueOf(row.outcome) to row.count }.getOrNull()
+            }.toMap(),
+        )
     }
 
     private fun Recommendation.toEntity() = RecommendationEntity(

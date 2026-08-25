@@ -41,6 +41,11 @@ class FastIntentRouterTest {
             "Como estão minhas vendas hoje?",
             "Me mostra o financeiro de hoje",
             "Qual foi meu movimento hoje?",
+            "Resumo de hoje",
+            "Como foi hoje?",
+            "Como recebi hoje?",
+            "Vendas de hoje",
+            "Movimento de hoje",
         ).forEach { phrase ->
             val result = router.route(phrase) as FastIntentResult.Match
 
@@ -84,6 +89,8 @@ class FastIntentRouterTest {
             "Lista meu estoque",
             "O que tenho cadastrado?",
             "Lista meus produtos",
+            "Quantos produtos tenho no meu estoque?",
+            "Me mostra todos os produtos",
         ).forEach { phrase ->
             val products = router.route(phrase) as FastIntentResult.Match
             assertEquals("$phrase deve listar produtos", TinoToolId.LIST_PRODUCTS, products.tool)

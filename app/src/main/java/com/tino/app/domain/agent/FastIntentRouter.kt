@@ -123,6 +123,8 @@ class FastIntentRouter @Inject constructor() {
             "listar meus produtos",
             "me mostra meus produtos",
             "me mostre meus produtos",
+            "todos os produtos",
+            "todos produtos",
             "lista meu estoque",
             "listar meu estoque",
             "me mostra meu estoque",
@@ -130,7 +132,10 @@ class FastIntentRouter @Inject constructor() {
             "mostrar estoque",
             "o que tenho cadastrado",
             "o que tenho no estoque",
-        ) || text in setOf("estoque", "produtos")
+        ) || text in setOf("estoque", "produtos") || (
+            text.contains("quantos produtos") &&
+                (text.contains("estoque") || text.contains("tenho") || text.contains("cadastrado"))
+        )
         if (!matches || text.contains("quanto custa") || text.contains("qual o preco") ||
             text.contains("qual e o preco")) {
             return null
@@ -266,8 +271,20 @@ class FastIntentRouter @Inject constructor() {
             "vendi",
             "foi recebido",
         )
-        val asksForFinancialOverview = containsAny(text, "financeiro", "movimento", "vendas") &&
-            containsAny(text, "como", "qual", "quanto", "mostra", "resumo")
+        val asksForFinancialOverview = (
+            containsAny(text, "financeiro", "movimento", "vendas") &&
+                containsAny(text, "como", "qual", "quanto", "mostra", "resumo")
+            ) || (text.contains("resumo") && isToday(text)) ||
+            (isToday(text) && containsAny(
+                text,
+                "como foi hoje",
+                "como foi meu dia",
+                "como recebi hoje",
+                "vendas de hoje",
+                "movimento de hoje",
+                "recebimentos de hoje",
+                "meu resumo",
+            ))
         if (!asksForReceivable && !asksForReceived && !asksForFinancialOverview) return null
         if (!isToday(text) && !asksForReceivable) return null
 

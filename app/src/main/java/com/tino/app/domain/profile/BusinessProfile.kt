@@ -121,6 +121,9 @@ object BusinessProfileValidator {
     fun validate(profile: BusinessProfile) {
         require(profile.version == BusinessProfile.CURRENT_VERSION) { "Versão de perfil não suportada." }
         require(BusinessModule.CORE in profile.enabledModules) { "Todo perfil precisa do módulo CORE." }
+        require(profile.enabledModules.all(TinoModuleRegistry::has)) {
+            "O perfil contém um módulo sem definição no registry."
+        }
         require(profile.permanentCapabilities.all { it in TinoCapabilityRegistry.all }) {
             "O perfil contém uma capability permanente desconhecida."
         }
@@ -213,16 +216,62 @@ object TinoModuleRegistry {
         analytics = setOf("stock_velocity", "days_of_coverage", "receivables"),
     )
 
-    private val modules = listOf(sales, inventory, customers, credit, stockEntry, fiscal, retail).associateBy { it.id }
+    /** Vertical markers compose existing capabilities; they do not create new screens or packs. */
+    val bakery = TinoVerticalModule(
+        id = BusinessModule.BAKERY,
+        supportedVerticals = setOf(BusinessVertical.BAKERY),
+        capabilities = setOf(
+            TinoCapabilityId.READ_FINANCIAL_SUMMARY,
+            TinoCapabilityId.LIST_PRODUCTS,
+            TinoCapabilityId.GET_PRODUCT_STOCK,
+            TinoCapabilityId.REPLENISHMENT_QUERY,
+            TinoCapabilityId.LIST_CUSTOMERS,
+        ),
+        vocabulary = setOf("padaria", "produção", "receita"),
+        analytics = setOf("sales", "stock_velocity"),
+    )
+    val restaurant = TinoVerticalModule(
+        id = BusinessModule.RESTAURANT,
+        supportedVerticals = setOf(BusinessVertical.RESTAURANT),
+        capabilities = setOf(
+            TinoCapabilityId.READ_FINANCIAL_SUMMARY,
+            TinoCapabilityId.LIST_CUSTOMERS,
+        ),
+        vocabulary = setOf("restaurante", "mesa", "comanda"),
+        analytics = setOf("sales"),
+    )
+    val store = retail.copy(
+        id = BusinessModule.STORE,
+        supportedVerticals = setOf(BusinessVertical.STORE),
+        vocabulary = retail.vocabulary + "loja",
+    )
 
-    fun forProfile(profile: BusinessProfile): List<TinoVerticalModule> = profile.enabledModules
+    private val modules = listOf(
+        sales,
+        inventory,
+        customers,
+        credit,
+        stockEntry,
+        fiscal,
+        retail,
+        bakery,
+        restaurant,
+        store,
+    ).associateBy { it.id }
+
+    fun has(module: BusinessModule): Boolean = module == BusinessModule.CORE || module in modules
+
+    fun definitionFor(module: BusinessModule): TinoVerticalModule? = modules[module]
+
+    fun forProfile(profile: BusinessProfile): List<TinoVerticalModule> = BusinessModule.values()
+        .filter(profile.enabledModules::contains)
         .mapNotNull(modules::get)
 
     fun isEnabled(profile: BusinessProfile, module: BusinessModule): Boolean =
         module == BusinessModule.CORE || module in profile.enabledModules
 
-    fun capabilitiesFor(profile: BusinessProfile): Set<TinoCapabilityId> = profile.enabledModules
-        .flatMap { module -> modules[module]?.capabilities.orEmpty() }
+    fun capabilitiesFor(profile: BusinessProfile): Set<TinoCapabilityId> = forProfile(profile)
+        .flatMap { module -> module.capabilities }
         .toSet()
 }
 

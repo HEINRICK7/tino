@@ -30,6 +30,35 @@ class BusinessProfileTest {
     }
 
     @Test
+    fun everyDeclaredVerticalModuleResolvesThroughTheSharedRegistry() {
+        val profile = BusinessProfile(
+            primaryVertical = BusinessVertical.BAKERY,
+            enabledModules = setOf(BusinessModule.CORE, BusinessModule.BAKERY),
+        )
+
+        val modules = TinoModuleRegistry.forProfile(profile)
+
+        assertEquals(listOf(TinoModuleRegistry.bakery), modules)
+        assertTrue(TinoModuleRegistry.has(BusinessModule.RESTAURANT))
+        assertTrue(TinoModuleRegistry.has(BusinessModule.STORE))
+    }
+
+    @Test
+    fun verticalMarkerComposesCapabilitiesWithoutChangingTheHomeContract() {
+        val profile = BusinessProfile(
+            primaryVertical = BusinessVertical.STORE,
+            enabledModules = setOf(BusinessModule.CORE, BusinessModule.STORE),
+        )
+
+        val context = DefaultBusinessContextResolver().resolve(profile)
+        val home = HomeConfiguration.from(context)
+
+        assertTrue(context.hasCapability(TinoCapabilityId.LIST_PRODUCTS))
+        assertTrue(home.has(HomeActionId.INVENTORY))
+        assertTrue(home.has(HomeActionId.CUSTOMERS))
+    }
+
+    @Test
     fun retailModuleExposesCapabilitiesToTheSharedAgentRegistry() {
         val module = TinoModuleRegistry.retail
 

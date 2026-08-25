@@ -1,5 +1,7 @@
 package com.tino.app.core.database
 
+import com.tino.app.core.observability.AuditEventType
+import com.tino.app.core.observability.AuditLogger
 import com.tino.app.domain.intelligence.Recommendation
 import com.tino.app.domain.intelligence.RecommendationDecision
 import com.tino.app.domain.intelligence.RecommendationEvidence
@@ -12,17 +14,35 @@ import javax.inject.Singleton
 @Singleton
 class RoomRecommendationRepository @Inject constructor(
     private val dao: RecommendationDao,
+    private val auditLogger: AuditLogger,
 ) : RecommendationRepository {
     override suspend fun saveAll(recommendations: List<Recommendation>) {
         if (recommendations.isEmpty()) return
         dao.upsertAll(recommendations.map { it.toEntity() })
+        recommendations.forEach { recommendation ->
+            auditLogger.record(
+                AuditEventType.ML_RECOMMENDATION,
+                mapOf(
+                    "recommendation_type" to recommendation.type.name,
+                    "status" to RecommendationDecision.PENDING.name,
+                ),
+            )
+        }
     }
 
     override suspend fun pending(): List<Recommendation> = dao.pending().map { it.toDomain() }
 
     override suspend fun updateDecision(id: String, decision: RecommendationDecision): Recommendation? {
         if (dao.updateDecision(id, decision.name) == 0) return null
-        return dao.findById(id)?.toDomain()
+        return dao.findById(id)?.toDomain()?.also { updated ->
+            auditLogger.record(
+                AuditEventType.ML_RECOMMENDATION,
+                mapOf(
+                    "recommendation_type" to updated.type.name,
+                    "status" to updated.decision.name,
+                ),
+            )
+        }
     }
 
     private fun Recommendation.toEntity() = RecommendationEntity(

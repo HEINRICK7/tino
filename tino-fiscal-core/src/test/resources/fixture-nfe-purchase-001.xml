@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35260812345678000195550010000000011000000018" versao="4.00">
+      <ide>
+        <cUF>35</cUF><natOp>COMPRA DE MERCADORIA</natOp><mod>55</mod><serie>1</serie>
+        <nNF>1</nNF><dhEmi>2026-08-10T14:20:00-03:00</dhEmi><tpNF>0</tpNF>
+      </ide>
+      <emit>
+        <CNPJ>12345678000195</CNPJ><xNome>DISTRIBUIDORA TESTE LTDA</xNome>
+        <xFant>DISTRIBUIDORA TESTE</xFant><IE>123456789</IE>
+        <enderEmit><xLgr>Rua das Flores</xLgr><nro>100</nro><xBairro>Centro</xBairro>
+          <xMun>São Paulo</xMun><UF>SP</UF><CEP>01000000</CEP></enderEmit>
+      </emit>
+      <dest>
+        <CNPJ>98765432000100</CNPJ><xNome>MERCADINHO TESTE DO INTERIOR</xNome><IE>987654321</IE>
+        <enderDest><xLgr>Rua Principal</xLgr><nro>10</nro><xBairro>Centro</xBairro>
+          <xMun>Teresina</xMun><UF>PI</UF><CEP>64000000</CEP></enderDest>
+      </dest>
+      <det nItem="1">
+        <prod><cProd>CAF001</cProd><cEAN>7891234567890</cEAN><xProd>Café Maratá 250g</xProd>
+          <NCM>09012100</NCM><CFOP>2102</CFOP><uCom>UN</uCom><qCom>24.0000</qCom>
+          <vUnCom>6.20</vUnCom><vProd>148.80</vProd></prod>
+        <imposto><vTotTrib>35.00</vTotTrib><ICMS><ICMS00><vICMS>26.78</vICMS></ICMS00></ICMS>
+          <PIS><PISAliq><vPIS>2.43</vPIS></PISAliq></PIS><COFINS><COFINSAliq><vCOFINS>11.20</vCOFINS></COFINSAliq></COFINS></imposto>
+      </det>
+      <det nItem="2">
+        <prod><cProd>ARZ002</cProd><cEAN>SEM GTIN</cEAN><xProd>Arroz Teste 5kg</xProd>
+          <NCM>10063021</NCM><CFOP>2102</CFOP><uCom>FD</uCom><qCom>10.0000</qCom>
+          <vUnCom>5.00</vUnCom><vProd>50.00</vProd></prod>
+        <imposto><vTotTrib>8.00</vTotTrib></imposto>
+      </det>
+      <total><ICMSTot><vProd>198.80</vProd><vFrete>10.00</vFrete><vDesc>0.00</vDesc>
+        <vOutro>0.00</vOutro><vNF>208.80</vNF></ICMSTot></total>
+      <cobr><dup><nDup>001</nDup><dVenc>2026-09-10</dVenc><vDup>208.80</vDup></dup></cobr>
+    </infNFe>
+  </NFe>
+</nfeProc>

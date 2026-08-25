@@ -1,0 +1,25 @@
+{
+  "experiment": "TINO-DOCUMENT-INTAKE-002",
+  "fixtures": [
+    {
+      "id": "danfe-cherta-001-full",
+      "image": "assets/WhatsApp Image 2026-08-18 at 09.41.39.jpeg",
+      "notes": "DANFE fotografada inteira, inclinada, tabela visível e com anotações manuais.",
+      "referenceRows": [
+        { "code": "1050", "description": "KIFLOCAO DE MILHO 20X500G", "ncm": "11041900", "cst": "040", "cfop": "5101", "unit": "FD", "quantity": "6" },
+        { "code": "1058", "description": "KIFLOCAO DE ARROZ 20X500G", "ncm": "11041900", "cst": "040", "cfop": "5101", "unit": "FD", "quantity": "1" },
+        { "code": "1068", "description": "MILHO PARA PIPOCA PREMIUM 20X500G", "ncm": "11031300", "cst": "000", "cfop": "5101", "unit": "FD", "quantity": "1" },
+        { "code": "1231", "description": "BISC KIKOS ROSQUINHA LEITE 12X300G", "ncm": "19059020", "cst": "000", "cfop": "5101", "unit": "CX", "quantity": "1" },
+        { "code": "1232", "description": "BISC KIKOS ROSQUINHA COCO 12X300G", "ncm": "19059020", "cst": "000", "cfop": "5101", "unit": "CX", "quantity": "1" },
+        { "code": "1234", "description": "BISC KIKOS CRACKINHO 12X300G", "ncm": "19059020", "cst": "000", "cfop": "5101", "unit": "CX", "quantity": "1" },
+        { "code": "1820", "description": "SAL G KIKOS 24X25G SORTIDO", "ncm": "11031300", "cst": "000", "cfop": "5101", "unit": "PC", "quantity": "30" }
+      ]
+    },
+    {
+      "id": "danfe-cherta-001-close-table",
+      "image": "assets/WhatsApp Image 2026-08-18 at 09.41.25.jpeg",
+      "notes": "Enquadramento aproximado da tabela; parte inferior da DANFE fica fora da foto.",
+      "referenceRows": ["Use as mesmas linhas da fixture danfe-cherta-001-full quando visíveis."]
+    }
+  ]
+}

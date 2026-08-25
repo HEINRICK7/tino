@@ -1,0 +1,14 @@
+package com.tino.app.ui.theme
+
+import androidx.compose.ui.unit.dp
+
+object TinoSpacing {
+    val xs = 4.dp
+    val sm = 8.dp
+    val md = 12.dp
+    val lg = 16.dp
+    val screen = 20.dp
+    val xl = 24.dp
+    val xxl = 32.dp
+    val exceptional = 40.dp
+}

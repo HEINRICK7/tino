@@ -1,0 +1,39 @@
+# Gradle and Kotlin caches
+.gradle/
+.kotlin/
+**/build/
+
+# Local Android configuration
+local.properties
+
+# IDE metadata
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Generated/local artifacts
+*.apk
+*.aab
+*.apks
+*.jks
+*.keystore
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Local ML model cache/artifacts (download separately; too large for GitHub)
+app/src/main/assets/models/*.task
+app/src/main/assets/models/.cache/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Local reports and logs
+*.log
+
+# Tool-generated local state
+.codex/

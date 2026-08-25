@@ -25,6 +25,7 @@ import com.tino.app.core.database.MIGRATION_13_14
 import com.tino.app.core.database.MIGRATION_14_15
 import com.tino.app.core.database.MIGRATION_15_16
 import com.tino.app.core.database.MIGRATION_16_17
+import com.tino.app.core.database.MIGRATION_17_18
 import com.tino.app.core.database.CustomerDao
 import com.tino.app.core.database.CreditDao
 import com.tino.app.core.database.DomainEventDao
@@ -52,6 +53,8 @@ import com.tino.app.core.database.BusinessMemoryDao
 import com.tino.app.core.database.RoomMutationOperationStore
 import com.tino.app.core.database.RoomInteractionStateStore
 import com.tino.app.core.database.RoomBusinessMemoryRepository
+import com.tino.app.core.database.RecommendationDao
+import com.tino.app.core.database.RoomRecommendationRepository
 import com.tino.app.domain.agent.AgentActivityRepository
 import com.tino.app.domain.intelligence.IntelligenceTelemetryPort
 import com.tino.app.core.sync.SyncGateway
@@ -118,6 +121,7 @@ import com.tino.app.domain.intelligence.IntelligencePlanExecutor
 import com.tino.app.domain.intelligence.IntelligencePlanValidator
 import com.tino.app.domain.intelligence.LocalHeuristicRecommendationEngine
 import com.tino.app.domain.intelligence.RecommendationEngine
+import com.tino.app.domain.intelligence.RecommendationRepository
 import com.tino.app.domain.intelligence.PlannerPort
 import com.tino.app.domain.intelligence.AdkPlanProposalPort
 import com.tino.app.domain.intelligence.AdkQueryPlanner
@@ -167,7 +171,7 @@ object AppModule {
     fun provideDatabase(@ApplicationContext context: Context): TinoDatabase =
         Room.databaseBuilder(context, TinoDatabase::class.java, "tino.db")
             .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
-            .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17)
+            .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18)
             .build()
 
     @Provides fun provideProductDao(database: TinoDatabase): ProductDao = database.productDao()
@@ -191,6 +195,7 @@ object AppModule {
     @Provides fun provideInteractionStateDao(database: TinoDatabase): InteractionStateDao = database.interactionStateDao()
     @Provides fun provideMutationOperationDao(database: TinoDatabase): MutationOperationDao = database.mutationOperationDao()
     @Provides fun provideBusinessMemoryDao(database: TinoDatabase): BusinessMemoryDao = database.businessMemoryDao()
+    @Provides fun provideRecommendationDao(database: TinoDatabase): RecommendationDao = database.recommendationDao()
     @Provides
     @Singleton
     fun provideAgentActivityRepository(implementation: RoomAgentActivityRepository): AgentActivityRepository = implementation
@@ -298,6 +303,10 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideRecommendationRepository(implementation: RoomRecommendationRepository): RecommendationRepository = implementation
+
+    @Provides
+    @Singleton
     fun provideIntelligenceMemory(implementation: InMemoryLongTermMemory): MemoryPort = implementation
 
     @Provides
@@ -337,12 +346,14 @@ object AppModule {
         knowledge: KnowledgeQueryPort,
         clock: Clock,
         recommendationEngine: RecommendationEngine,
+        recommendationRepository: RecommendationRepository,
     ): IntelligencePlanExecutor = DeterministicIntelligencePlanExecutor(
         facts = facts,
         analytics = analytics,
         knowledge = knowledge,
         clock = clock,
         recommendationEngine = recommendationEngine,
+        recommendationRepository = recommendationRepository,
     )
 
     @Provides

@@ -8,6 +8,8 @@ import com.tino.app.domain.intelligence.IntelligenceTextNormalizer
 import com.tino.app.domain.intelligence.KnowledgeQueryPort
 import com.tino.app.domain.intelligence.LocalHeuristicRecommendationEngine
 import com.tino.app.domain.intelligence.RecommendationEngine
+import com.tino.app.domain.intelligence.RecommendationRepository
+import com.tino.app.domain.intelligence.NoOpRecommendationRepository
 import com.tino.app.domain.intelligence.clarification.DeterministicClarificationPolicy
 import com.tino.app.domain.intelligence.clarification.IntelligenceClarificationPolicy
 import com.tino.app.domain.intelligence.grounding.DeterministicGroundingComposer
@@ -27,6 +29,7 @@ class DeterministicIntelligencePlanExecutor(
     facts: IntelligenceFactsPort,
     analytics: BusinessAnalyticsPort,
     recommendationEngine: RecommendationEngine = LocalHeuristicRecommendationEngine(),
+    recommendationRepository: RecommendationRepository = NoOpRecommendationRepository,
     knowledge: KnowledgeQueryPort,
     clock: Clock,
     private val clarificationPolicy: IntelligenceClarificationPolicy = DeterministicClarificationPolicy(),
@@ -36,6 +39,7 @@ class DeterministicIntelligencePlanExecutor(
         facts = facts,
         analytics = analytics,
         recommendationEngine = recommendationEngine,
+        recommendationRepository = recommendationRepository,
         knowledge = knowledge,
         clock = clock,
         clarificationPolicy = clarificationPolicy,

@@ -171,6 +171,24 @@ data class OrderItemEntity(
     val unitPriceCents: Long,
 )
 
+@Entity(
+    tableName = "recommendations",
+    indices = [Index("productId"), Index("createdAtEpochMs"), Index("decision")],
+)
+data class RecommendationEntity(
+    @androidx.room.PrimaryKey val id: String,
+    val type: String,
+    val productId: String,
+    val message: String,
+    val confidence: Double,
+    val decision: String,
+    val createdAtEpochMs: Long,
+    val stockQuantity: Int?,
+    val unitsSoldLast30Days: Int?,
+    val rule: String?,
+    val windowDays: Int?,
+)
+
 @Entity(tableName = "sync_cursors")
 data class SyncCursorEntity(
     @androidx.room.PrimaryKey val scope: String,

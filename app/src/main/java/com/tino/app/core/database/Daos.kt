@@ -258,6 +258,21 @@ interface StockMovementDao {
 }
 
 @Dao
+interface RecommendationDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(recommendations: List<RecommendationEntity>)
+
+    @Query("SELECT * FROM recommendations WHERE decision = 'PENDING' ORDER BY createdAtEpochMs DESC")
+    suspend fun pending(): List<RecommendationEntity>
+
+    @Query("UPDATE recommendations SET decision = :decision WHERE id = :id")
+    suspend fun updateDecision(id: String, decision: String): Int
+
+    @Query("SELECT * FROM recommendations WHERE id = :id LIMIT 1")
+    suspend fun findById(id: String): RecommendationEntity?
+}
+
+@Dao
 interface DomainEventDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIgnore(event: DomainEventEntity)

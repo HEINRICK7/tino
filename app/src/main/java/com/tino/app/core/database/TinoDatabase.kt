@@ -58,8 +58,9 @@ class TinoConverters {
         InteractionStateEntity::class,
         MutationOperationEntity::class,
         BusinessMemoryEntity::class,
+        RecommendationEntity::class,
     ],
-    version = 17,
+    version = 18,
     exportSchema = true,
 )
 @TypeConverters(TinoConverters::class)
@@ -85,6 +86,7 @@ abstract class TinoDatabase : RoomDatabase() {
     abstract fun interactionStateDao(): InteractionStateDao
     abstract fun mutationOperationDao(): MutationOperationDao
     abstract fun businessMemoryDao(): BusinessMemoryDao
+    abstract fun recommendationDao(): RecommendationDao
 }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -256,5 +258,16 @@ val MIGRATION_16_17 = object : Migration(16, 17) {
         database.execSQL("CREATE INDEX IF NOT EXISTS index_orders_createdAt ON orders(createdAt)")
         database.execSQL("CREATE INDEX IF NOT EXISTS index_orders_status ON orders(status)")
         database.execSQL("CREATE TABLE IF NOT EXISTS order_items (orderId TEXT NOT NULL, lineNumber INTEGER NOT NULL, productId TEXT NOT NULL, productName TEXT NOT NULL, quantity INTEGER NOT NULL, unitPriceCents INTEGER NOT NULL, PRIMARY KEY(orderId, lineNumber))")
+    }
+}
+
+val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL(
+            "CREATE TABLE IF NOT EXISTS recommendations (id TEXT NOT NULL PRIMARY KEY, type TEXT NOT NULL, productId TEXT NOT NULL, message TEXT NOT NULL, confidence REAL NOT NULL, decision TEXT NOT NULL, createdAtEpochMs INTEGER NOT NULL, stockQuantity INTEGER, unitsSoldLast30Days INTEGER, rule TEXT, windowDays INTEGER)",
+        )
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_recommendations_productId ON recommendations(productId)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_recommendations_createdAtEpochMs ON recommendations(createdAtEpochMs)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_recommendations_decision ON recommendations(decision)")
     }
 }

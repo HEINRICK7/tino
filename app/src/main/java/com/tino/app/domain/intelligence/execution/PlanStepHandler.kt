@@ -11,6 +11,7 @@ data class PlanHandlerContext(
     val facts: IntelligenceFactsPort,
     val analytics: BusinessAnalyticsPort,
     val recommendationEngine: RecommendationEngine,
+    val recommendationRepository: RecommendationRepository,
     val knowledge: KnowledgeQueryPort,
     val clock: Clock,
     val clarificationPolicy: IntelligenceClarificationPolicy,
@@ -31,6 +32,7 @@ abstract class BasePlanHandler(
     protected val facts: IntelligenceFactsPort get() = context.facts
     protected val analytics: BusinessAnalyticsPort get() = context.analytics
     protected val recommendationEngine: RecommendationEngine get() = context.recommendationEngine
+    protected val recommendationRepository: RecommendationRepository get() = context.recommendationRepository
     protected val knowledge: KnowledgeQueryPort get() = context.knowledge
     protected val clock: Clock get() = context.clock
     protected val clarificationPolicy: IntelligenceClarificationPolicy get() = context.clarificationPolicy

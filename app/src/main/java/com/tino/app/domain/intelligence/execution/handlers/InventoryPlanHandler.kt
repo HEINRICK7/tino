@@ -94,6 +94,7 @@ class InventoryPlanHandler(
             facts = facts,
             analytics = analytics,
             engine = recommendationEngine,
+            repository = recommendationRepository,
         ).generate(request.timestampEpochMs)
         val actionable = predictive.recommendations.filter {
             it.type == RecommendationType.STOCKOUT || it.type == RecommendationType.REPLENISHMENT

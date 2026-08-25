@@ -37,6 +37,18 @@ interface RecommendationEngine {
     fun generate(signals: List<InventorySignal>): List<Recommendation>
 }
 
+interface RecommendationRepository {
+    suspend fun saveAll(recommendations: List<Recommendation>)
+    suspend fun pending(): List<Recommendation>
+    suspend fun updateDecision(id: String, decision: RecommendationDecision): Recommendation?
+}
+
+object NoOpRecommendationRepository : RecommendationRepository {
+    override suspend fun saveAll(recommendations: List<Recommendation>) = Unit
+    override suspend fun pending(): List<Recommendation> = emptyList()
+    override suspend fun updateDecision(id: String, decision: RecommendationDecision): Recommendation? = null
+}
+
 @Singleton
 class LocalHeuristicRecommendationEngine @Inject constructor() : RecommendationEngine {
     override fun generate(signals: List<InventorySignal>): List<Recommendation> = signals.flatMap { signal ->
@@ -100,6 +112,7 @@ class PredictiveRecommendationService(
     private val facts: IntelligenceFactsPort,
     private val analytics: BusinessAnalyticsPort,
     private val engine: RecommendationEngine,
+    private val repository: RecommendationRepository = NoOpRecommendationRepository,
 ) {
     suspend fun generate(nowEpochMs: Long): PredictiveInventoryResult {
         val signals = facts.products().map { product ->
@@ -115,17 +128,30 @@ class PredictiveRecommendationService(
                 unitsSoldLast30Days = velocity.unitsLastPeriod,
             )
         }
+        val generated = engine.generate(signals)
+        val existingKeys = repository.pending()
+            .mapTo(mutableSetOf()) { "${it.type.name}:${it.productId}" }
+        val recommendations = generated.filterNot { "${it.type.name}:${it.productId}" in existingKeys }
+        repository.saveAll(recommendations)
         return PredictiveInventoryResult(
             signals = signals,
-            recommendations = engine.generate(signals),
+            recommendations = generated,
             generatedAt = Instant.ofEpochMilli(nowEpochMs),
         )
     }
 }
 
-class RecommendationDecisionService {
+class RecommendationDecisionService(
+    private val repository: RecommendationRepository = NoOpRecommendationRepository,
+) {
     fun decide(recommendation: Recommendation, accepted: Boolean): Recommendation =
         recommendation.copy(
             decision = if (accepted) RecommendationDecision.ACCEPTED else RecommendationDecision.REJECTED,
         )
+
+    suspend fun decideAndPersist(recommendation: Recommendation, accepted: Boolean): Recommendation {
+        val decided = decide(recommendation, accepted)
+        repository.updateDecision(decided.id, decided.decision)
+        return decided
+    }
 }

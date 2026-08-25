@@ -149,6 +149,28 @@ data class PurchaseItemEntity(
     val unitCostCents: Long,
 )
 
+@Entity(tableName = "orders", indices = [Index("createdAt"), Index("status")])
+data class OrderEntity(
+    @androidx.room.PrimaryKey val id: String,
+    val channel: String,
+    val fulfillment: String,
+    val customerName: String?,
+    val addressReference: String?,
+    val status: String,
+    val totalCents: Long,
+    val createdAt: Long,
+)
+
+@Entity(tableName = "order_items", primaryKeys = ["orderId", "lineNumber"])
+data class OrderItemEntity(
+    val orderId: String,
+    val lineNumber: Int,
+    val productId: String,
+    val productName: String,
+    val quantity: Int,
+    val unitPriceCents: Long,
+)
+
 @Entity(tableName = "sync_cursors")
 data class SyncCursorEntity(
     @androidx.room.PrimaryKey val scope: String,

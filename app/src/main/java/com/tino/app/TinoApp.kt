@@ -46,6 +46,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -176,6 +177,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import java.text.NumberFormat
 import java.util.Locale
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun TinoApp(
@@ -195,6 +197,8 @@ internal fun TinoApp(
     val todayCard by viewModel.todayCardCents.collectAsStateWithLifecycle()
     val todaySales by viewModel.todaySalesCount.collectAsStateWithLifecycle()
     val suppliers by viewModel.suppliers.collectAsStateWithLifecycle()
+    val orders by viewModel.orders.collectAsStateWithLifecycle()
+    val orderDetail by viewModel.orderDetail.collectAsStateWithLifecycle()
     val pendingSyncCount by viewModel.pendingSyncCount.collectAsStateWithLifecycle()
     val storeProfile by viewModel.storeProfile.collectAsStateWithLifecycle()
     val profileLoaded by viewModel.profileLoaded.collectAsStateWithLifecycle()
@@ -342,6 +346,8 @@ internal fun TinoApp(
                 todaySales = todaySales,
                 pendingSyncCount = pendingSyncCount,
                 suppliers = suppliers,
+                orders = orders,
+                orderDetail = orderDetail,
                 storeProfile = storeProfile,
                 voiceState = voiceState,
                 contextualVoiceState = contextualVoiceState,
@@ -382,15 +388,21 @@ internal fun TinoApp(
                 },
                 businessProfile = businessProfile,
                 activeCapabilities = activeCapabilities,
-                onUpdateBusinessProfile = viewModel::updateBusinessProfile,
-                onAddProduct = viewModel::addProduct,
-                onSell = { product, quantity, paymentMethod -> viewModel.sell(product, quantity, paymentMethod) },
+                onUpdateBusinessProfile = viewModel::updateBusinessProfileAndWait,
+                onAddProduct = viewModel::addProductAndWait,
+                onSell = { product, quantity, paymentMethod -> viewModel.sellAndWait(product, quantity, paymentMethod) },
                 onAddCustomer = viewModel::addCustomer,
                 onUpdateCustomer = viewModel::updateCustomer,
-                onCreditSale = viewModel::sellOnCredit,
-                onReceivePayment = viewModel::receivePayment,
-                onReceiveStock = viewModel::receiveStock,
-                onAddSupplier = viewModel::addSupplier,
+                onCreditSale = viewModel::sellOnCreditAndWait,
+                onReceivePayment = viewModel::receivePaymentAndWait,
+                onReceiveStock = viewModel::receiveStockAndWait,
+                onAddSupplier = viewModel::addSupplierAndWait,
+                onCreateOrder = viewModel::createOrderAndWait,
+                onOpenOrder = { orderId ->
+                    viewModel.openOrder(orderId)
+                    navigate(TinoScreen.OrderDetail)
+                },
+                onUpdateOrderStatus = viewModel::updateOrderStatusAndWait,
                 onFiscalDocumentProcessed = { result, rectifiedPath ->
                     fiscalDocumentCaptured = true
                     fiscalImportResult = result
@@ -1139,10 +1151,35 @@ internal fun String.normalizeVoiceText(): String = java.text.Normalizer
 internal fun ReceiveSaleScreen(
     lines: List<SaleLine>,
     onNavigate: (TinoScreen) -> Unit,
-    onSell: (ProductSummary, Int, PaymentMethod) -> Unit,
+    onSell: suspend (ProductSummary, Int, PaymentMethod) -> Result<Unit>,
     onComplete: (TinoCompletion) -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var submissionError by remember { mutableStateOf<String?>(null) }
     val total = lines.sumOf { it.quantity * it.product.priceCents }
+
+    fun submit(paymentMethod: PaymentMethod) {
+        if (submitting || lines.isEmpty()) return
+        scope.launch {
+            submitting = true
+            submissionError = null
+            var failure: Throwable? = null
+            for (line in lines) {
+                val result = onSell(line.product, line.quantity, paymentMethod)
+                failure = result.exceptionOrNull()
+                if (failure != null) break
+            }
+            submitting = false
+            if (failure == null) {
+                onComplete(TinoCompletion("Venda registrada", "Pagamento salvo com segurança."))
+            } else {
+                submissionError = failure.message ?: "Não foi possível registrar a venda. Tente novamente."
+            }
+        }
+    }
+
     ScreenColumn {
         TinoTopBar("Receber venda") { onNavigate(TinoScreen.QuickSale) }
         if (lines.isEmpty()) {
@@ -1157,11 +1194,18 @@ internal fun ReceiveSaleScreen(
                 HorizontalDivider()
                 MetricLine("Total", formatCents(total.toLong()), true, TinoGreenDark)
             }
+            submissionError?.let { errorMessage ->
+                TinoCard {
+                    Text("Não foi possível registrar", style = MaterialTheme.typography.titleMedium, color = TinoRed)
+                    Text(errorMessage, color = TinoMuted)
+                    TinoSecondaryButton("TENTAR NOVAMENTE") { submissionError = null }
+                }
+            }
             Text("Como recebeu?", style = MaterialTheme.typography.titleMedium)
-            PaymentChoice(TinoIcons.Cash, "Dinheiro") { lines.forEach { onSell(it.product, it.quantity, PaymentMethod.CASH) }; onComplete(TinoCompletion("Venda registrada", "Pagamento em dinheiro salvo.")) }
-            PaymentChoice(TinoIcons.Pix, "PIX") { lines.forEach { onSell(it.product, it.quantity, PaymentMethod.PIX) }; onComplete(TinoCompletion("Venda registrada", "Pagamento via PIX salvo.")) }
-            PaymentChoice(TinoIcons.Card, "Maquininha") { lines.forEach { onSell(it.product, it.quantity, PaymentMethod.CARD) }; onComplete(TinoCompletion("Venda registrada", "Pagamento na maquininha salvo.")) }
-            PaymentChoice(TinoIcons.Credit, "Fiado") { onNavigate(TinoScreen.SelectCustomer) }
+            PaymentChoice(TinoIcons.Cash, "Dinheiro", enabled = !submitting) { submit(PaymentMethod.CASH) }
+            PaymentChoice(TinoIcons.Pix, "PIX", enabled = !submitting) { submit(PaymentMethod.PIX) }
+            PaymentChoice(TinoIcons.Card, "Maquininha", enabled = !submitting) { submit(PaymentMethod.CARD) }
+            PaymentChoice(TinoIcons.Credit, "Fiado", enabled = !submitting) { onNavigate(TinoScreen.SelectCustomer) }
         }
     }
 }
@@ -1409,9 +1453,12 @@ internal fun ConfirmCreditScreen(
     customer: CustomerBalance?,
     lines: List<SaleLine>,
     onNavigate: (TinoScreen) -> Unit,
-    onCreditSale: (ProductSummary, String, Int) -> Unit,
+    onCreditSale: suspend (ProductSummary, String, Int) -> Result<Unit>,
     onComplete: (TinoCompletion) -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
+    var submissionError by remember { mutableStateOf<String?>(null) }
     ScreenColumn {
         if (customer == null || lines.isEmpty()) {
             TinoTopBar("Confirmar fiado") { onNavigate(TinoScreen.SelectCustomer) }
@@ -1429,9 +1476,29 @@ internal fun ConfirmCreditScreen(
             HorizontalDivider()
             MetricLine("Ficará devendo", formatCents((current + sale).toLong()), true, TinoRed)
         }
+        submissionError?.let { errorMessage ->
+            TinoCard {
+                Text("Não foi possível anotar o fiado", style = MaterialTheme.typography.titleMedium, color = TinoRed)
+                Text(errorMessage, color = TinoMuted)
+                TinoSecondaryButton("TENTAR NOVAMENTE") { submissionError = null }
+            }
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
-            TinoSecondaryButton("CANCELAR", { onNavigate(TinoScreen.Home) }, Modifier.weight(1f))
-            TinoPrimaryButton("ANOTAR", { lines.forEach { onCreditSale(it.product, name, it.quantity) }; onComplete(TinoCompletion("Fiado anotado", "A compra foi vinculada a $name.")) }, Modifier.weight(1f))
+            TinoSecondaryButton("CANCELAR", { onNavigate(TinoScreen.Home) }, Modifier.weight(1f), enabled = !submitting)
+            TinoPrimaryButton("ANOTAR", {
+                if (!submitting) scope.launch {
+                    submitting = true
+                    submissionError = null
+                    var failure: Throwable? = null
+                    for (line in lines) {
+                        failure = onCreditSale(line.product, name, line.quantity).exceptionOrNull()
+                        if (failure != null) break
+                    }
+                    submitting = false
+                    if (failure == null) onComplete(TinoCompletion("Fiado anotado", "A compra foi vinculada a $name."))
+                    else submissionError = failure?.message ?: "Não foi possível anotar o fiado. Tente novamente."
+                }
+            }, Modifier.weight(1f), enabled = !submitting)
         }
     }
 }
@@ -1517,7 +1584,7 @@ internal fun paymentMethodLabel(value: String): String = when (value.lowercase()
 internal fun ReceivePaymentScreen(
     customer: CustomerBalance?,
     onNavigate: (TinoScreen) -> Unit,
-    onReceivePayment: (CustomerBalance, String) -> Unit,
+    onReceivePayment: suspend (CustomerBalance, String) -> Result<Unit>,
     onComplete: (TinoCompletion) -> Unit,
 ) {
     ScreenColumn {
@@ -1528,6 +1595,9 @@ internal fun ReceivePaymentScreen(
             return@ScreenColumn
         }
         var amount by remember { mutableStateOf("") }
+        val scope = rememberCoroutineScope()
+        var submitting by remember { mutableStateOf(false) }
+        var submissionError by remember { mutableStateOf<String?>(null) }
         val paymentCents = parseCentsForUi(amount)
         val canConfirm = paymentCents > 0 && paymentCents <= customer.balanceCents
         TinoTopBar("Receber pagamento") { onNavigate(TinoScreen.CustomerAccount) }
@@ -1541,14 +1611,30 @@ internal fun ReceivePaymentScreen(
             MetricLine("Pagamento", formatCents(paymentCents))
             MetricLine("Depois", formatCents((customer.balanceCents - paymentCents).coerceAtLeast(0)), true)
         }
-        TinoPrimaryButton("RECEBER PAGAMENTO", { onReceivePayment(customer, amount); onComplete(TinoCompletion("Pagamento registrado", "O saldo de ${customer.name} foi atualizado.")) }, Modifier, enabled = canConfirm)
+        submissionError?.let { errorMessage ->
+            TinoCard {
+                Text("Não foi possível registrar o pagamento", style = MaterialTheme.typography.titleMedium, color = TinoRed)
+                Text(errorMessage, color = TinoMuted)
+                TinoSecondaryButton("TENTAR NOVAMENTE") { submissionError = null }
+            }
+        }
+        TinoPrimaryButton("RECEBER PAGAMENTO", {
+            if (!submitting) scope.launch {
+                submitting = true
+                submissionError = null
+                val failure = onReceivePayment(customer, amount).exceptionOrNull()
+                submitting = false
+                if (failure == null) onComplete(TinoCompletion("Pagamento registrado", "O saldo de ${customer.name} foi atualizado."))
+                else submissionError = failure.message ?: "Não foi possível registrar o pagamento. Tente novamente."
+            }
+        }, Modifier, enabled = canConfirm && !submitting)
     }
 }
 
 @Composable
 internal fun NewProductScreen(
     onNavigate: (TinoScreen) -> Unit,
-    onAddProduct: (String, String, String) -> Unit,
+    onAddProduct: suspend (String, String, String) -> Result<Unit>,
     contextualVoiceState: ContextualVoiceState = ContextualVoiceState.Idle,
     onVoiceStart: () -> Unit = {},
     onVoiceStop: () -> Unit = {},
@@ -1556,6 +1642,9 @@ internal fun NewProductScreen(
     var name by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("") }
     var stock by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
+    var submissionError by remember { mutableStateOf<String?>(null) }
     val priceCents = parseCentsForUi(price)
     val stockQuantity = stock.toIntOrNull()
     val canCreate = name.isNotBlank() && priceCents > 0 && stockQuantity != null && stockQuantity >= 0
@@ -1576,6 +1665,13 @@ internal fun NewProductScreen(
         if (stock.isNotBlank() && (stockQuantity == null || stockQuantity < 0)) {
             Text("Informe um estoque igual ou maior que zero.", color = TinoRed)
         }
+        submissionError?.let { errorMessage ->
+            TinoCard {
+                Text("Não foi possível cadastrar", style = MaterialTheme.typography.titleMedium, color = TinoRed)
+                Text(errorMessage, color = TinoMuted)
+                TinoSecondaryButton("TENTAR NOVAMENTE") { submissionError = null }
+            }
+        }
         ContextualVoicePanel(
             context = VoiceContext.PRODUCT_CREATE,
             state = contextualVoiceState,
@@ -1583,7 +1679,16 @@ internal fun NewProductScreen(
             onStart = onVoiceStart,
             onStop = onVoiceStop,
         )
-        TinoPrimaryButton("CADASTRAR PRODUTO", { onAddProduct(name, price, stock); onNavigate(TinoScreen.Products) }, Modifier, enabled = canCreate)
+        TinoPrimaryButton("CADASTRAR PRODUTO", {
+            if (!submitting) scope.launch {
+                submitting = true
+                submissionError = null
+                val failure = onAddProduct(name, price, stock).exceptionOrNull()
+                submitting = false
+                if (failure == null) onNavigate(TinoScreen.Products)
+                else submissionError = failure.message ?: "Não foi possível cadastrar o produto. Tente novamente."
+            }
+        }, Modifier, enabled = canCreate && !submitting)
     }
 }
 
@@ -1609,7 +1714,7 @@ internal fun AdjustStockScreen(product: ProductSummary?, onNavigate: (TinoScreen
 @Composable
 internal fun StockEntryScreen(
     onNavigate: (TinoScreen) -> Unit,
-    onReceiveStock: (String, String, String, String) -> Unit,
+    onReceiveStock: suspend (String, String, String, String) -> Result<Unit>,
     contextualVoiceState: ContextualVoiceState = ContextualVoiceState.Idle,
     onVoiceStart: () -> Unit = {},
     onVoiceStop: () -> Unit = {},
@@ -1618,6 +1723,9 @@ internal fun StockEntryScreen(
     var quantity by remember { mutableStateOf("") }
     var cost by remember { mutableStateOf("") }
     var supplier by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
+    var submissionError by remember { mutableStateOf<String?>(null) }
     val canSave = productName.isNotBlank() && (quantity.toIntOrNull() ?: 0) > 0 && parseCentsForUi(cost) > 0
     LaunchedEffect(contextualVoiceState) {
         val fields = contextualVoiceState.fieldsFor(VoiceContext.STOCK_RECEIPT)
@@ -1634,6 +1742,13 @@ internal fun StockEntryScreen(
         TinoTextField(quantity, { quantity = it }, "Quantidade", "Ex.: 24")
         TinoMoneyField(cost, { cost = it }, "Custo unitário")
         TinoTextField(supplier, { supplier = it }, "Fornecedor (opcional)", "Nome do fornecedor")
+        submissionError?.let { errorMessage ->
+            TinoCard {
+                Text("Não foi possível registrar a entrada", style = MaterialTheme.typography.titleMedium, color = TinoRed)
+                Text(errorMessage, color = TinoMuted)
+                TinoSecondaryButton("TENTAR NOVAMENTE") { submissionError = null }
+            }
+        }
         ContextualVoicePanel(
             context = VoiceContext.STOCK_RECEIPT,
             state = contextualVoiceState,
@@ -1643,9 +1758,18 @@ internal fun StockEntryScreen(
         )
         TinoPrimaryButton(
             "REGISTRAR ENTRADA",
-            { onReceiveStock(productName, quantity, cost, supplier); onNavigate(TinoScreen.Products) },
+            {
+                if (!submitting) scope.launch {
+                    submitting = true
+                    submissionError = null
+                    val failure = onReceiveStock(productName, quantity, cost, supplier).exceptionOrNull()
+                    submitting = false
+                    if (failure == null) onNavigate(TinoScreen.Products)
+                    else submissionError = failure.message ?: "Não foi possível registrar a entrada. Tente novamente."
+                }
+            },
             Modifier,
-            enabled = canSave,
+            enabled = canSave && !submitting,
         )
     }
 }
@@ -1828,6 +1952,78 @@ internal fun PurchaseSuggestionsScreen(onNavigate: (TinoScreen) -> Unit) {
 }
 
 @Composable
+internal fun NewOrderScreen(
+    products: List<ProductSummary>,
+    customers: List<CustomerBalance>,
+    onNavigate: (TinoScreen) -> Unit,
+    onCreateOrder: suspend (String, Int, String?, String) -> Result<Unit>,
+) {
+    var query by remember { mutableStateOf("") }
+    var selectedProductId by remember { mutableStateOf<String?>(null) }
+    var quantity by remember { mutableStateOf("1") }
+    var customerName by remember { mutableStateOf("") }
+    var fulfillment by remember { mutableStateOf("PICKUP") }
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
+    var submissionError by remember { mutableStateOf<String?>(null) }
+    val selectedProduct = products.firstOrNull { it.id == selectedProductId }
+    val shownProducts = products.filter { it.name.contains(query, ignoreCase = true) }.take(5)
+    val customerSuggestions = customers.filter { it.name.contains(customerName, ignoreCase = true) }.take(3)
+    val parsedQuantity = quantity.toIntOrNull() ?: 0
+
+    ScreenColumn {
+        TinoTopBar("Novo pedido") { onNavigate(TinoScreen.Orders) }
+        Text("O que o cliente pediu?", style = MaterialTheme.typography.titleLarge)
+        if (products.isEmpty()) {
+            TinoEmptyState(TinoIcons.Products, "Nenhum produto cadastrado", "Cadastre um produto antes de criar um pedido.")
+            TinoSecondaryButton("VOLTAR A PRODUTOS") { onNavigate(TinoScreen.Products) }
+        } else {
+            TinoSearchField(query, { query = it }, "Procurar produto")
+            shownProducts.forEach { product ->
+                TinoSaleProductRow(
+                    product = product,
+                    onAdd = { selectedProductId = product.id; query = product.name },
+                )
+            }
+            selectedProduct?.let { product ->
+                TinoCard {
+                    Text("Item do pedido", style = MaterialTheme.typography.titleMedium)
+                    Text(product.name, fontWeight = FontWeight.SemiBold)
+                    Text(formatCents(product.priceCents), color = TinoMuted)
+                }
+            }
+            TinoTextField(quantity, { quantity = it }, "Quantidade", "Ex.: 2")
+            TinoTextField(customerName, { customerName = it }, "Cliente (opcional)", "Nome do cliente")
+            customerSuggestions.forEach { customer ->
+                TinoSecondaryButton(customer.name) { customerName = customer.name }
+            }
+            Text("Como será recebido?", style = MaterialTheme.typography.titleMedium)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
+                TinoFilterChip("Retirada", fulfillment == "PICKUP") { fulfillment = "PICKUP" }
+                TinoFilterChip("Entrega", fulfillment == "DELIVERY") { fulfillment = "DELIVERY" }
+            }
+            submissionError?.let { errorMessage ->
+                TinoCard {
+                    Text("Não foi possível criar o pedido", style = MaterialTheme.typography.titleMedium, color = TinoRed)
+                    Text(errorMessage, color = TinoMuted)
+                    TinoSecondaryButton("TENTAR NOVAMENTE") { submissionError = null }
+                }
+            }
+            TinoPrimaryButton("CRIAR PEDIDO", {
+                if (!submitting && selectedProduct != null && parsedQuantity > 0) scope.launch {
+                    submitting = true
+                    submissionError = null
+                    val failure = onCreateOrder(selectedProduct.id, parsedQuantity, customerName, fulfillment).exceptionOrNull()
+                    submitting = false
+                    if (failure == null) onNavigate(TinoScreen.Orders)
+                    else submissionError = failure.message ?: "Não foi possível criar o pedido. Tente novamente."
+                }
+            }, Modifier, enabled = selectedProduct != null && parsedQuantity > 0 && !submitting)
+        }
+    }
+}
+
+@Composable
 internal fun SupplierOrderScreen(onNavigate: (TinoScreen) -> Unit) {
     ScreenColumn {
         TinoTopBar("Pedido") { onNavigate(TinoScreen.PurchaseSuggestions) }
@@ -1840,13 +2036,16 @@ internal fun SupplierOrderScreen(onNavigate: (TinoScreen) -> Unit) {
 internal fun SuppliersScreen(
     suppliers: List<SupplierEntity>,
     onNavigate: (TinoScreen) -> Unit,
-    onAddSupplier: (String, String?) -> Unit,
+    onAddSupplier: suspend (String, String?) -> Result<Unit>,
     contextualVoiceState: ContextualVoiceState = ContextualVoiceState.Idle,
     onVoiceStart: () -> Unit = {},
     onVoiceStop: () -> Unit = {},
 ) {
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
+    var submissionError by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(contextualVoiceState) {
         val fields = contextualVoiceState.fieldsFor(VoiceContext.SUPPLIER_CREATE)
         fields["name"]?.takeIf { it.isNotBlank() }?.let { name = it }
@@ -1861,6 +2060,13 @@ internal fun SuppliersScreen(
         }
         TinoTextField(name, { name = it }, "Novo fornecedor", "Nome")
         TinoTextField(phone, { phone = it }, "Celular (opcional)", "Ex.: (86) 9 4209-3500")
+        submissionError?.let { errorMessage ->
+            TinoCard {
+                Text("Não foi possível cadastrar", style = MaterialTheme.typography.titleMedium, color = TinoRed)
+                Text(errorMessage, color = TinoMuted)
+                TinoSecondaryButton("TENTAR NOVAMENTE") { submissionError = null }
+            }
+        }
         ContextualVoicePanel(
             context = VoiceContext.SUPPLIER_CREATE,
             state = contextualVoiceState,
@@ -1868,46 +2074,197 @@ internal fun SuppliersScreen(
             onStart = onVoiceStart,
             onStop = onVoiceStop,
         )
-        TinoSecondaryButton("ADICIONAR FORNECEDOR") {
-            if (name.isNotBlank()) onAddSupplier(name, phone.ifBlank { null })
-            name = ""
-            phone = ""
-        }
+        TinoSecondaryButton("ADICIONAR FORNECEDOR", {
+            if (!submitting && name.isNotBlank()) scope.launch {
+                submitting = true
+                submissionError = null
+                val failure = onAddSupplier(name, phone.ifBlank { null }).exceptionOrNull()
+                submitting = false
+                if (failure == null) {
+                    name = ""
+                    phone = ""
+                } else {
+                    submissionError = failure.message ?: "Não foi possível cadastrar o fornecedor. Tente novamente."
+                }
+            }
+        }, Modifier, enabled = !submitting && name.isNotBlank())
     }
 }
 
 @Composable
-internal fun OrdersScreen(onNavigate: (TinoScreen) -> Unit) {
+internal fun OrdersScreen(
+    orders: List<com.tino.app.core.database.OrderSummary>,
+    onNavigate: (TinoScreen) -> Unit,
+    onOpenOrder: (String) -> Unit = {},
+) {
     ScreenColumn {
         TinoTopBar("Pedidos") { onNavigate(TinoScreen.More) }
-        TinoEmptyState(TinoIcons.Orders, "Nenhum pedido recebido", "Quando chegar um pedido, ele aparecerá aqui com o próximo passo.")
+        TinoPrimaryButton("NOVO PEDIDO") { onNavigate(TinoScreen.NewOrder) }
+        if (orders.isEmpty()) {
+            TinoEmptyState(TinoIcons.Orders, "Nenhum pedido recebido", "Quando chegar um pedido, ele aparecerá aqui com o próximo passo.")
+        } else {
+            Text("Pedidos recentes", style = MaterialTheme.typography.titleMedium)
+            orders.forEach { order ->
+                TinoOrderRow(
+                    status = order.status.toOrderStatusLabel(),
+                    customer = order.customerName ?: "Cliente não informado",
+                    total = formatCents(order.totalCents),
+                    onClick = { onOpenOrder(order.id) },
+                )
+            }
+        }
         TinoSecondaryButton("VOLTAR PARA MAIS") { onNavigate(TinoScreen.More) }
     }
 }
 
+private fun String.toOrderStatusLabel(): String = when (uppercase()) {
+    "DRAFT" -> "Rascunho"
+    "CONFIRMED" -> "Confirmado"
+    "PREPARING" -> "Em preparo"
+    "READY" -> "Pronto"
+    "DELIVERED" -> "Entregue"
+    "CANCELLED" -> "Cancelado"
+    else -> this
+}
+
 @Composable
-internal fun OrderDetailScreen(onNavigate: (TinoScreen) -> Unit) {
+internal fun OrderDetailScreen(
+    detail: com.tino.app.core.database.OrderDetail?,
+    onNavigate: (TinoScreen) -> Unit,
+    onUpdateStatus: suspend (String, String) -> Result<Unit> = { _, _ -> Result.success(Unit) },
+) {
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
     ScreenColumn {
         TinoTopBar("Detalhe do pedido") { onNavigate(TinoScreen.Orders) }
-        TinoEmptyState(TinoIcons.Orders, "Pedido não selecionado", "Volte à lista para escolher um pedido antes de separar.")
+        if (detail == null) {
+            TinoEmptyState(TinoIcons.Orders, "Carregando pedido", "Aguarde os dados do pedido serem carregados.")
+        } else {
+            val order = detail.order
+            TinoCard {
+                Text(order.customerName ?: "Cliente não informado", style = MaterialTheme.typography.titleLarge)
+                Text("${order.fulfillment.toOrderFulfillmentLabel()} · ${order.status.toOrderStatusLabel()}", color = TinoMuted)
+                Text(formatCents(order.totalCents), style = MaterialTheme.typography.headlineSmall, color = TinoGreen, fontWeight = FontWeight.Bold)
+            }
+            Text("Itens", style = MaterialTheme.typography.titleMedium)
+            detail.items.forEach { item ->
+                TinoCard {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(Modifier.weight(1f)) {
+                            Text(item.productName, fontWeight = FontWeight.SemiBold)
+                            Text("${item.quantity} un. × ${formatCents(item.unitPriceCents)}", color = TinoMuted)
+                        }
+                        Text(formatCents(item.unitPriceCents * item.quantity), fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            error?.let { message ->
+                TinoCard {
+                    Text("Não foi possível atualizar", color = TinoRed, fontWeight = FontWeight.Bold)
+                    Text(message, color = TinoMuted)
+                }
+            }
+            order.status.nextOrderStatus()?.let { (nextStatus, label) ->
+                TinoPrimaryButton(label, {
+                    if (!submitting) scope.launch {
+                        submitting = true
+                        error = null
+                        val failure = onUpdateStatus(order.id, nextStatus).exceptionOrNull()
+                        submitting = false
+                        if (failure != null) error = failure.message ?: "Tente novamente."
+                    }
+                }, Modifier, enabled = !submitting)
+            }
+            if (order.status == "PREPARING") {
+                TinoSecondaryButton("ABRIR SEPARAÇÃO") { onNavigate(TinoScreen.Picking) }
+            } else if (order.status == "READY" && order.fulfillment == "DELIVERY") {
+                TinoSecondaryButton("ABRIR ENTREGA") { onNavigate(TinoScreen.Delivery) }
+            }
+        }
         TinoSecondaryButton("VOLTAR A PEDIDOS") { onNavigate(TinoScreen.Orders) }
     }
 }
 
+private fun String.toOrderFulfillmentLabel(): String = when (uppercase()) {
+    "DELIVERY" -> "Entrega"
+    "PICKUP" -> "Retirada"
+    else -> this
+}
+
+private fun String.nextOrderStatus(): Pair<String, String>? = when (uppercase()) {
+    "CONFIRMED" -> "PREPARING" to "INICIAR SEPARAÇÃO"
+    "PREPARING" -> "READY" to "MARCAR COMO PRONTO"
+    "READY" -> "DELIVERED" to "CONCLUIR PEDIDO"
+    else -> null
+}
+
 @Composable
-internal fun PickingScreen(onNavigate: (TinoScreen) -> Unit) {
+internal fun PickingScreen(
+    detail: com.tino.app.core.database.OrderDetail?,
+    onNavigate: (TinoScreen) -> Unit,
+    onUpdateStatus: suspend (String, String) -> Result<Unit> = { _, _ -> Result.success(Unit) },
+) {
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
+    var submissionError by remember { mutableStateOf<String?>(null) }
     ScreenColumn {
         TinoTopBar("Separar pedido") { onNavigate(TinoScreen.OrderDetail) }
-        TinoEmptyState(TinoIcons.Orders, "Nenhum pedido em separação", "Escolha um pedido para acompanhar os itens separados.")
+        if (detail == null) {
+            TinoEmptyState(TinoIcons.Orders, "Carregando pedido", "Aguarde os itens do pedido serem carregados.")
+        } else {
+            Text(detail.order.customerName ?: "Cliente não informado", style = MaterialTheme.typography.titleLarge)
+            detail.items.forEach { item ->
+                TinoCard {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(item.productName, fontWeight = FontWeight.SemiBold)
+                        Text("${item.quantity} un.", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            TinoPrimaryButton("MARCAR COMO PRONTO", {
+                if (!submitting) scope.launch {
+                    submitting = true
+                    submissionError = onUpdateStatus(detail.order.id, "READY").exceptionOrNull()?.message
+                    submitting = false
+                    if (submissionError == null) onNavigate(TinoScreen.OrderDetail)
+                }
+            }, Modifier, enabled = !submitting)
+            submissionError?.let { Text(it, color = TinoRed) }
+        }
         TinoSecondaryButton("VOLTAR AO PEDIDO") { onNavigate(TinoScreen.OrderDetail) }
     }
 }
 
 @Composable
-internal fun DeliveryScreen(onNavigate: (TinoScreen) -> Unit) {
+internal fun DeliveryScreen(
+    detail: com.tino.app.core.database.OrderDetail?,
+    onNavigate: (TinoScreen) -> Unit,
+    onUpdateStatus: suspend (String, String) -> Result<Unit> = { _, _ -> Result.success(Unit) },
+) {
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
+    var submissionError by remember { mutableStateOf<String?>(null) }
     ScreenColumn {
         TinoTopBar("Entrega") { onNavigate(TinoScreen.Orders) }
-        TinoEmptyState(TinoIcons.Location, "Nenhuma entrega pronta", "Os detalhes de endereço e pagamento aparecerão quando houver um pedido pronto.")
+        if (detail == null) {
+            TinoEmptyState(TinoIcons.Location, "Carregando entrega", "Aguarde os dados do pedido serem carregados.")
+        } else {
+            TinoCard {
+                Text("Entregar para", style = MaterialTheme.typography.titleMedium)
+                Text(detail.order.customerName ?: "Cliente não informado", style = MaterialTheme.typography.titleLarge)
+                Text(formatCents(detail.order.totalCents), color = TinoGreen, fontWeight = FontWeight.Bold)
+            }
+            TinoPrimaryButton("CONCLUIR ENTREGA", {
+                if (!submitting) scope.launch {
+                    submitting = true
+                    submissionError = onUpdateStatus(detail.order.id, "DELIVERED").exceptionOrNull()?.message
+                    submitting = false
+                    if (submissionError == null) onNavigate(TinoScreen.OrderDetail)
+                }
+            }, Modifier, enabled = !submitting)
+            submissionError?.let { Text(it, color = TinoRed) }
+        }
         TinoSecondaryButton("VOLTAR A PEDIDOS") { onNavigate(TinoScreen.Orders) }
     }
 }
@@ -2241,7 +2598,7 @@ internal fun SettingsScreen(
 @Composable
 internal fun BusinessProfileSettingsScreen(
     profile: BusinessProfile?,
-    onSave: (BusinessProfile) -> Unit,
+    onSave: suspend (BusinessProfile) -> Result<Unit>,
     onNavigate: (TinoScreen) -> Unit,
 ) {
     val current = profile ?: BusinessProfile(
@@ -2253,6 +2610,8 @@ internal fun BusinessProfileSettingsScreen(
     var permanentCapabilities by remember(current) { mutableStateOf(current.permanentCapabilities) }
     var customize by remember(current) { mutableStateOf(false) }
     var configurationError by remember(current) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
     val selectableModules = modulesForConfiguration()
 
     ScreenColumn {
@@ -2329,9 +2688,9 @@ internal fun BusinessProfileSettingsScreen(
                 }
             }
         }
-        TinoPrimaryButton("SALVAR CONFIGURAÇÃO") {
+        TinoPrimaryButton("SALVAR CONFIGURAÇÃO", {
             configurationError = null
-            runCatching {
+            val candidate = runCatching {
                 current.copy(
                     primaryVertical = vertical,
                     enabledModules = modules + BusinessModule.CORE,
@@ -2342,14 +2701,20 @@ internal fun BusinessProfileSettingsScreen(
                         OperationalPatternCatalog.forVertical(vertical)
                     },
                 )
-            }.onSuccess {
-                onSave(it)
-                onNavigate(TinoScreen.Settings)
-            }.onFailure {
-                configurationError = profileConfigurationError(it)
             }
-        }
-        TinoSecondaryButton("CANCELAR") { onNavigate(TinoScreen.Settings) }
+            candidate.onFailure {
+                configurationError = profileConfigurationError(it)
+            }.onSuccess { nextProfile ->
+                if (!submitting) scope.launch {
+                    submitting = true
+                    val failure = onSave(nextProfile).exceptionOrNull()
+                    submitting = false
+                    if (failure == null) onNavigate(TinoScreen.Settings)
+                    else configurationError = profileConfigurationError(failure)
+                }
+            }
+        }, Modifier, enabled = !submitting)
+        TinoSecondaryButton("CANCELAR", { onNavigate(TinoScreen.Settings) }, Modifier, enabled = !submitting)
     }
 }
 
@@ -2490,17 +2855,17 @@ internal fun ChoiceFlowScreen(title: String, icon: ImageVector, body: String, se
 }
 
 @Composable
-internal fun PaymentChoice(icon: ImageVector, label: String, onClick: () -> Unit) {
+internal fun PaymentChoice(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth().height(TinoSize.buttonHeight).clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().height(TinoSize.buttonHeight).clickable(enabled = enabled, onClick = onClick),
         shape = com.tino.app.ui.theme.TinoShapes.small,
-        colors = CardDefaults.cardColors(containerColor = TinoGreenTint),
+        colors = CardDefaults.cardColors(containerColor = if (enabled) TinoGreenTint else TinoSurface),
         border = androidx.compose.foundation.BorderStroke(1.dp, TinoGreenBorder),
         elevation = CardDefaults.cardElevation(defaultElevation = TinoSize.cardElevation),
     ) {
         Row(Modifier.fillMaxSize().padding(horizontal = TinoSpacing.lg), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(TinoSpacing.md)) {
-            Icon(icon, contentDescription = label, tint = TinoGreen)
-            Text(label, fontWeight = FontWeight.Bold)
+            Icon(icon, contentDescription = label, tint = if (enabled) TinoGreen else TinoMuted)
+            Text(label, fontWeight = FontWeight.Bold, color = if (enabled) TinoInk else TinoMuted)
         }
     }
 }
@@ -2587,17 +2952,17 @@ internal fun PreviewFrame(content: @Composable () -> Unit) {
 @Preview(name = "UI-009 New sale", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi009() = PreviewFrame { QuickSaleScreen(demoProducts(), {}, onContinue = {}) }
 @Preview(name = "UI-010 Payment", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi010() = PreviewFrame { ReceiveSaleScreen(listOf(SaleLine(demoProducts().first(), 1)), {}, { _, _, _ -> }, {}) }
+@Composable private fun PreviewUi010() = PreviewFrame { ReceiveSaleScreen(listOf(SaleLine(demoProducts().first(), 1)), {}, { _, _, _ -> Result.success(Unit) }, {}) }
 @Preview(name = "UI-011 Credit customer", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi011() = PreviewFrame { SelectCustomerScreen(demoCustomers(), {}, {}) }
 @Preview(name = "UI-012 Credit confirmation", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi012() = PreviewFrame { ConfirmCreditScreen(demoCustomers().first(), listOf(SaleLine(demoProducts().first(), 1)), {}, { _, _, _ -> }, {}) }
+@Composable private fun PreviewUi012() = PreviewFrame { ConfirmCreditScreen(demoCustomers().first(), listOf(SaleLine(demoProducts().first(), 1)), {}, { _, _, _ -> Result.success(Unit) }, {}) }
 @Preview(name = "UI-013 Credit list", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi013() = PreviewFrame { CreditListScreen(demoCustomers(), {}, { _, _ -> }, {}) }
 @Preview(name = "UI-014 Customer account", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi014() = PreviewFrame { CustomerAccountScreen(demoCustomers().first(), null, {}) }
 @Preview(name = "UI-015 Credit payment", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi015() = PreviewFrame { ReceivePaymentScreen(demoCustomers().first(), {}, { _, _ -> }, {}) }
+@Composable private fun PreviewUi015() = PreviewFrame { ReceivePaymentScreen(demoCustomers().first(), {}, { _, _ -> Result.success(Unit) }, {}) }
 @Preview(name = "UI-016 Product list", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi016() = PreviewFrame { ProductsScreen(demoProducts(), {}, {}) }
 @Preview(name = "UI-017 Product detail", showBackground = true, widthDp = 412, heightDp = 915)
@@ -2605,9 +2970,9 @@ internal fun PreviewFrame(content: @Composable () -> Unit) {
 @Preview(name = "UI-018 Stock adjustment", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi018() = PreviewFrame { AdjustStockScreen(demoProducts().first(), {}) }
 @Preview(name = "UI-019 New product", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi019() = PreviewFrame { NewProductScreen({}, { _, _, _ -> }) }
+@Composable private fun PreviewUi019() = PreviewFrame { NewProductScreen({}, { _, _, _ -> Result.success(Unit) }) }
 @Preview(name = "UI-020 Stock intake", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi020() = PreviewFrame { StockEntryScreen({}, { _, _, _, _ -> }) }
+@Composable private fun PreviewUi020() = PreviewFrame { StockEntryScreen({}, { _, _, _, _ -> Result.success(Unit) }) }
 @Preview(name = "UI-021 Fiscal document", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi021() = PreviewFrame { FiscalFoundScreen(onNavigate = {}) }
 @Preview(name = "UI-022 Fiscal review", showBackground = true, widthDp = 412, heightDp = 915)
@@ -2617,15 +2982,15 @@ internal fun PreviewFrame(content: @Composable () -> Unit) {
 @Preview(name = "UI-024 Supplier order", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi024() = PreviewFrame { SupplierOrderScreen {} }
 @Preview(name = "UI-025 Suppliers", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi025() = PreviewFrame { SuppliersScreen(emptyList(), {}, { _, _ -> }) }
+@Composable private fun PreviewUi025() = PreviewFrame { SuppliersScreen(emptyList(), {}, { _, _ -> Result.success(Unit) }) }
 @Preview(name = "UI-026 Orders", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi026() = PreviewFrame { OrdersScreen {} }
+@Composable private fun PreviewUi026() = PreviewFrame { OrdersScreen(emptyList(), {}) }
 @Preview(name = "UI-027 Order detail", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi027() = PreviewFrame { OrderDetailScreen {} }
+@Composable private fun PreviewUi027() = PreviewFrame { OrderDetailScreen(null, {}) }
 @Preview(name = "UI-028 Picking", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi028() = PreviewFrame { PickingScreen {} }
+@Composable private fun PreviewUi028() = PreviewFrame { PickingScreen(null, {}) }
 @Preview(name = "UI-029 Delivery", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi029() = PreviewFrame { DeliveryScreen {} }
+@Composable private fun PreviewUi029() = PreviewFrame { DeliveryScreen(null, {}) }
 @Preview(name = "UI-030 Insights", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi030() = PreviewFrame { InsightsScreen(demoProducts(), {}) }
 @Preview(name = "UI-031 Daily summary", showBackground = true, widthDp = 412, heightDp = 915)

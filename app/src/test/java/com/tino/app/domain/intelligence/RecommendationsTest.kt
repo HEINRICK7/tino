@@ -18,5 +18,7 @@ class RecommendationsTest {
         assertTrue(output.any { it.type == RecommendationType.STOCKOUT && it.productId == "p1" })
         assertTrue(output.any { it.type == RecommendationType.SLOW_MOVING && it.productId == "p2" })
         assertTrue(output.all { it.decision == RecommendationDecision.PENDING })
+        assertEquals("stock_zero_with_recent_sales", output.first { it.type == RecommendationType.STOCKOUT }.evidence?.rule)
+        assertEquals(12, output.first { it.type == RecommendationType.STOCKOUT }.evidence?.unitsSoldLast30Days)
     }
 }

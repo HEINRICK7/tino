@@ -394,13 +394,14 @@ fun TinoPrimaryButton(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-fun TinoSecondaryButton(label: String, onClick: () -> Unit, modifier: Modifier) {
+fun TinoSecondaryButton(label: String, onClick: () -> Unit, modifier: Modifier, enabled: Boolean = true) {
     OutlinedButton(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier.fillMaxWidth().heightIn(min = TinoSize.buttonHeight),
         shape = TinoShapes.small,
         contentPadding = PaddingValues(horizontal = TinoSpacing.sm, vertical = TinoSpacing.xs),
-        border = ButtonDefaults.outlinedButtonBorder(enabled = true).copy(width = 1.dp),
+        border = ButtonDefaults.outlinedButtonBorder(enabled = enabled).copy(width = 1.dp),
         colors = ButtonDefaults.outlinedButtonColors(contentColor = TinoGreen),
     ) {
         Text(

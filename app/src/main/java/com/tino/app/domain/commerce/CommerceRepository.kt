@@ -25,6 +25,10 @@ import com.tino.app.core.database.PurchaseDao
 import com.tino.app.core.database.PurchaseEntity
 import com.tino.app.core.database.PurchaseItemEntity
 import com.tino.app.core.database.PurchaseStatus
+import com.tino.app.core.database.OrderSummary
+import com.tino.app.core.database.OrderDetail
+import com.tino.app.core.database.OrderEntity
+import com.tino.app.core.database.OrderItemEntity
 import com.tino.app.core.sync.SyncScheduler
 import com.tino.app.core.database.TinoDatabase
 import kotlinx.coroutines.flow.Flow
@@ -55,6 +59,13 @@ class CommerceRepository @Inject constructor(
         val correctedPaymentOperationId: String,
     )
     fun observeProducts(): Flow<List<ProductSummary>> = productDao.observeAll()
+
+    fun observeOrders(): Flow<List<OrderSummary>> = database.orderDao().observeAll()
+
+    suspend fun findOrderDetail(orderId: String): OrderDetail? {
+        val order = database.orderDao().findById(orderId) ?: return null
+        return OrderDetail(order, database.orderDao().items(orderId))
+    }
 
     fun observeTodayTotal(): Flow<Long> = saleDao.observeTodayTotal(startOfToday())
 
@@ -682,6 +693,72 @@ class CommerceRepository @Inject constructor(
                 event(identity, productId, "stock.received", now, JSONObject()
                     .put("product_id", productId).put("quantity", quantity)
                     .put("purchase_id", purchaseId).put("unit_cost_cents", unitCostCents)),
+            )
+        }
+        syncScheduler.schedule()
+    }
+
+    suspend fun createManualOrder(
+        productId: String,
+        quantity: Int,
+        customerName: String?,
+        fulfillment: String,
+    ) {
+        require(quantity > 0) { "A quantidade do pedido precisa ser maior que zero." }
+        database.withTransaction {
+            val product = productDao.findById(productId) ?: error("Produto não encontrado.")
+            val now = System.currentTimeMillis()
+            val orderId = UuidV7.new()
+            val totalCents = product.priceCents * quantity
+            database.orderDao().insert(
+                OrderEntity(
+                    id = orderId,
+                    channel = "MANUAL",
+                    fulfillment = fulfillment,
+                    customerName = customerName?.trim()?.ifBlank { null },
+                    addressReference = null,
+                    status = "CONFIRMED",
+                    totalCents = totalCents,
+                    createdAt = now,
+                ),
+            )
+            database.orderDao().insertItems(
+                listOf(OrderItemEntity(orderId, 0, product.id, product.name, quantity, product.priceCents)),
+            )
+            val identity = identityProvider.current()
+            database.domainEventDao().insert(
+                event(identity, orderId, "order.created", now, JSONObject()
+                    .put("order_id", orderId)
+                    .put("channel", "MANUAL")
+                    .put("fulfillment", fulfillment)
+                    .putOpt("customer_name", customerName)
+                    .put("product_id", product.id)
+                    .put("quantity", quantity)
+                    .put("total_cents", totalCents)),
+            )
+        }
+        syncScheduler.schedule()
+    }
+
+    suspend fun updateOrderStatus(orderId: String, status: String) {
+        require(status in setOf("CONFIRMED", "PREPARING", "READY", "DELIVERED", "CANCELLED")) {
+            "Status de pedido inválido."
+        }
+        database.withTransaction {
+            val order = database.orderDao().findById(orderId) ?: error("Pedido não encontrado.")
+            val now = System.currentTimeMillis()
+            database.orderDao().updateStatus(orderId, status)
+            database.domainEventDao().insert(
+                event(
+                    identityProvider.current(),
+                    orderId,
+                    "order.status_changed",
+                    now,
+                    JSONObject()
+                        .put("order_id", orderId)
+                        .put("previous_status", order.status)
+                        .put("status", status),
+                ),
             )
         }
         syncScheduler.schedule()

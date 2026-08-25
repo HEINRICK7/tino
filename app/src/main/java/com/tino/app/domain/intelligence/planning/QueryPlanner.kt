@@ -21,6 +21,7 @@ enum class IntelligenceGoal {
     LOWEST_STOCK,
     STOCK_TREND,
     STOCK_RISK,
+    REPLENISHMENT_RECOMMENDATION,
     PAYMENT_BEHAVIOR,
     RECEIVABLES,
     INVENTORY,
@@ -59,6 +60,7 @@ class DeterministicIntelligenceQueryPlanner : IntelligenceQueryPlanner {
             asksPaymentMethodBreakdown(text) -> IntelligenceGoal.PAYMENT_METHOD_BREAKDOWN
             asksPeriodComparison(text) -> IntelligenceGoal.PERIOD_COMPARISON
             asksRecentPayment(text) -> IntelligenceGoal.RECENT_PAYMENTS
+            asksReplenishment(text) -> IntelligenceGoal.REPLENISHMENT_RECOMMENDATION
             asksStockRisk(text) -> IntelligenceGoal.STOCK_RISK
             asksLowestStock(text) -> IntelligenceGoal.LOWEST_STOCK
             asksStockTrend(text) -> IntelligenceGoal.STOCK_TREND
@@ -117,6 +119,13 @@ class DeterministicIntelligenceQueryPlanner : IntelligenceQueryPlanner {
             "calculate_stock_velocity" to "calcular velocidade de queda",
             "calculate_reorder_signal" to "classificar risco de reposição",
         )
+        IntelligenceGoal.REPLENISHMENT_RECOMMENDATION -> steps(
+            "search_product" to "ler catálogo",
+            "get_product_stock" to "ler saldos",
+            "get_stock_movements" to "ler histórico de saída",
+            "calculate_stock_velocity" to "calcular demanda recente",
+            "generate_replenishment_recommendations" to "gerar recomendações explicáveis",
+        )
         IntelligenceGoal.PAYMENT_BEHAVIOR -> steps(
             "search_customer" to "resolver cliente",
             "get_customer_payment_history" to "ler histórico",
@@ -157,6 +166,14 @@ class DeterministicIntelligenceQueryPlanner : IntelligenceQueryPlanner {
 
     private fun asksRecentPayment(text: String) =
         text.contains("pagamento recentemente") || text.contains("fez pagamento") || text.contains("pagou recentemente")
+
+    private fun asksReplenishment(text: String) =
+        text.contains("preciso comprar") || text.contains("tenho que comprar") ||
+            text.contains("o que comprar") || text.contains("o que devo comprar") ||
+            text.contains("preciso repor") || text.contains("tenho que repor") ||
+            text.contains("para repor") || text.contains("reposição") ||
+            text.contains("repor estoque") || text.contains("o que acabou") ||
+            text.contains("o que está faltando")
 
     private fun asksLowestStock(text: String) =
         text.contains("menor estoque") || text.contains("menos estoque")

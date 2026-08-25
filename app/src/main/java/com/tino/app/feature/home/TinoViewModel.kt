@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.tino.app.core.database.ProductSummary
 import com.tino.app.core.database.CustomerBalance
 import com.tino.app.core.database.SupplierEntity
+import com.tino.app.core.database.OrderSummary
+import com.tino.app.core.database.OrderDetail
 import com.tino.app.domain.commerce.CommerceRepository
 import com.tino.app.domain.commerce.PaymentMethod
 import com.tino.app.domain.commerce.CustomerCreditTimeline
@@ -70,6 +72,12 @@ class TinoViewModel @Inject constructor(
     private val _suppliers = MutableStateFlow<List<SupplierEntity>>(emptyList())
     val suppliers: StateFlow<List<SupplierEntity>> = _suppliers.asStateFlow()
 
+    private val _orders = MutableStateFlow<List<OrderSummary>>(emptyList())
+    val orders: StateFlow<List<OrderSummary>> = _orders.asStateFlow()
+
+    private val _orderDetail = MutableStateFlow<OrderDetail?>(null)
+    val orderDetail: StateFlow<OrderDetail?> = _orderDetail.asStateFlow()
+
     private val _pendingSyncCount = MutableStateFlow(0)
     val pendingSyncCount: StateFlow<Int> = _pendingSyncCount.asStateFlow()
 
@@ -98,6 +106,7 @@ class TinoViewModel @Inject constructor(
         viewModelScope.launch { repository.observeTodayPayment(PaymentMethod.CARD).collect { _todayCardCents.value = it } }
         viewModelScope.launch { repository.observeTodaySalesCount().collect { _todaySalesCount.value = it } }
         viewModelScope.launch { repository.observeSuppliers().collect { _suppliers.value = it } }
+        viewModelScope.launch { repository.observeOrders().collect { _orders.value = it } }
         viewModelScope.launch { repository.observePendingEventCount().collect { _pendingSyncCount.value = it } }
         viewModelScope.launch {
             storeProfileRepository.observe().collect {
@@ -139,39 +148,42 @@ class TinoViewModel @Inject constructor(
     }
 
     fun updateBusinessProfile(profile: BusinessProfile) {
-        viewModelScope.launch {
-            runCatching { storeProfileRepository.updateProfile(profile) }
-                .onSuccess {
-                    auditLogger.record(
-                        AuditEventType.DOMAIN_OPERATION,
-                        mapOf(
-                            "profile_action" to "updated",
-                            "vertical" to profile.primaryVertical.name,
-                            "module_count" to profile.enabledModules.size.toString(),
-                            "patterns" to profile.effectiveOperationalPatterns().joinToString(",") { it.name },
-                            "permanent_capability_count" to profile.permanentCapabilities.size.toString(),
-                        ),
-                    )
-                    _message.value = "Configuração do negócio atualizada."
-                }
-                .onFailure { _message.value = it.message ?: "Não foi possível atualizar o negócio." }
-        }
+        viewModelScope.launch { updateBusinessProfileAndWait(profile) }
+    }
+
+    suspend fun updateBusinessProfileAndWait(profile: BusinessProfile): Result<Unit> = runCatching {
+        storeProfileRepository.updateProfile(profile)
+        auditLogger.record(
+            AuditEventType.DOMAIN_OPERATION,
+            mapOf(
+                "profile_action" to "updated",
+                "vertical" to profile.primaryVertical.name,
+                "module_count" to profile.enabledModules.size.toString(),
+                "patterns" to profile.effectiveOperationalPatterns().joinToString(",") { it.name },
+                "permanent_capability_count" to profile.permanentCapabilities.size.toString(),
+            ),
+        )
+    }.onSuccess {
+        _message.value = "Configuração do negócio atualizada."
+    }.onFailure {
+        _message.value = it.message ?: "Não foi possível atualizar o negócio."
     }
 
     fun addProduct(name: String, price: String, stock: String) {
-        viewModelScope.launch {
-            runCatching {
-                repository.createProduct(
-                    name = name,
-                    priceCents = price.toCents(),
-                    initialStock = stock.toIntOrNull() ?: 0,
-                )
-            }.onSuccess {
-                _message.value = "Produto salvo neste aparelho."
-            }.onFailure {
-                _message.value = it.message ?: "Não foi possível salvar o produto."
-            }
-        }
+        viewModelScope.launch { addProductAndWait(name, price, stock) }
+    }
+
+    suspend fun addProductAndWait(name: String, price: String, stock: String): Result<Unit> = runCatching {
+        repository.createProduct(
+            name = name,
+            priceCents = price.toCents(),
+            initialStock = stock.toIntOrNull() ?: 0,
+        )
+        Unit
+    }.onSuccess {
+        _message.value = "Produto salvo neste aparelho."
+    }.onFailure {
+        _message.value = it.message ?: "Não foi possível salvar o produto."
     }
 
     fun loadCustomerTimeline(customerId: String?) {
@@ -193,11 +205,19 @@ class TinoViewModel @Inject constructor(
         quantity: Int,
         paymentMethod: PaymentMethod = PaymentMethod.CASH,
     ) {
-        viewModelScope.launch {
-            runCatching { repository.registerSale(product.id, quantity, paymentMethod) }
-                .onSuccess { _message.value = "Venda salva. Estoque atualizado." }
-                .onFailure { _message.value = it.message ?: "Não foi possível registrar a venda." }
-        }
+        viewModelScope.launch { sellAndWait(product, quantity, paymentMethod) }
+    }
+
+    suspend fun sellAndWait(
+        product: ProductSummary,
+        quantity: Int,
+        paymentMethod: PaymentMethod = PaymentMethod.CASH,
+    ): Result<Unit> = runCatching {
+        repository.registerSale(product.id, quantity, paymentMethod)
+    }.onSuccess {
+        _message.value = "Venda salva. Estoque atualizado."
+    }.onFailure {
+        _message.value = it.message ?: "Não foi possível registrar a venda."
     }
 
     fun addCustomer(name: String, phone: String? = null) {
@@ -217,51 +237,99 @@ class TinoViewModel @Inject constructor(
     }
 
     fun addSupplier(name: String, phone: String? = null) {
-        viewModelScope.launch {
-            runCatching { repository.createSupplier(name, phone) }
-                .onSuccess { _message.value = "Fornecedor salvo neste aparelho." }
-                .onFailure { _message.value = it.message ?: "Não foi possível salvar o fornecedor." }
-        }
+        viewModelScope.launch { addSupplierAndWait(name, phone) }
+    }
+
+    suspend fun addSupplierAndWait(name: String, phone: String? = null): Result<Unit> = runCatching {
+        repository.createSupplier(name, phone)
+        Unit
+    }.onSuccess {
+        _message.value = "Fornecedor salvo neste aparelho."
+    }.onFailure {
+        _message.value = it.message ?: "Não foi possível salvar o fornecedor."
+    }
+
+    suspend fun createOrderAndWait(
+        productId: String,
+        quantity: Int,
+        customerName: String?,
+        fulfillment: String,
+    ): Result<Unit> = runCatching {
+        repository.createManualOrder(productId, quantity, customerName, fulfillment)
+    }.onSuccess {
+        _message.value = "Pedido criado neste aparelho."
+    }.onFailure {
+        _message.value = it.message ?: "Não foi possível criar o pedido."
+    }
+
+    fun openOrder(orderId: String) {
+        viewModelScope.launch { _orderDetail.value = repository.findOrderDetail(orderId) }
+    }
+
+    suspend fun updateOrderStatusAndWait(orderId: String, status: String): Result<Unit> = runCatching {
+        repository.updateOrderStatus(orderId, status)
+        _orderDetail.value = repository.findOrderDetail(orderId)
+    }.onSuccess {
+        _message.value = "Status do pedido atualizado."
+    }.onFailure {
+        _message.value = it.message ?: "Não foi possível atualizar o pedido."
     }
 
     fun sellOnCredit(product: ProductSummary, customerName: String, quantity: Int) {
-        viewModelScope.launch {
-            runCatching {
-                val customer = repository.findCustomerByName(customerName)
-                    ?: error("Cliente não encontrado.")
-                repository.registerCreditSale(customer.id, product.id, quantity)
-            }.onSuccess { _message.value = "Fiado salvo. Estoque atualizado." }
-                .onFailure { _message.value = it.message ?: "Não foi possível registrar o fiado." }
-        }
+        viewModelScope.launch { sellOnCreditAndWait(product, customerName, quantity) }
     }
 
+    suspend fun sellOnCreditAndWait(
+        product: ProductSummary,
+        customerName: String,
+        quantity: Int,
+    ): Result<Unit> = runCatching {
+        val customer = repository.findCustomerByName(customerName)
+            ?: error("Cliente não encontrado.")
+        repository.registerCreditSale(customer.id, product.id, quantity)
+    }.onSuccess {
+        _message.value = "Fiado salvo. Estoque atualizado."
+    }.onFailure {
+        _message.value = it.message ?: "Não foi possível registrar o fiado."
+    }
     fun receivePayment(customer: CustomerBalance, amount: String) {
-        viewModelScope.launch {
-            runCatching {
-                registerCreditPayment(
-                    RegisterCreditPaymentCommand(
-                        customerId = customer.id,
-                        amountCents = amount.toCents(),
-                        paymentMethod = PaymentMethod.CASH,
-                        operationId = UuidV7.new(),
-                    ),
-                )
-            }
-                .onSuccess { _message.value = "Pagamento salvo." }
-                .onFailure { _message.value = it.message ?: "Não foi possível registrar o pagamento." }
-        }
+        viewModelScope.launch { receivePaymentAndWait(customer, amount) }
     }
 
+    suspend fun receivePaymentAndWait(customer: CustomerBalance, amount: String): Result<Unit> = runCatching {
+        registerCreditPayment(
+            RegisterCreditPaymentCommand(
+                customerId = customer.id,
+                amountCents = amount.toCents(),
+                paymentMethod = PaymentMethod.CASH,
+                operationId = UuidV7.new(),
+            ),
+        )
+        Unit
+    }.onSuccess {
+        _message.value = "Pagamento salvo."
+    }.onFailure {
+        _message.value = it.message ?: "Não foi possível registrar o pagamento."
+    }
     fun receiveStock(productName: String, quantity: String, cost: String, supplierName: String) {
-        viewModelScope.launch {
-            runCatching {
-                val product = repository.findProductByName(productName) ?: error("Produto não encontrado.")
-                val supplier = supplierName.trim().takeIf { it.isNotEmpty() }
-                    ?.let { repository.findSupplierByName(it) ?: error("Fornecedor não encontrado.") }
-                repository.registerStockReceipt(product.id, quantity.toInt(), cost.toCents(), supplier?.id)
-            }.onSuccess { _message.value = "Entrada de mercadoria salva." }
-                .onFailure { _message.value = it.message ?: "Não foi possível registrar a entrada." }
-        }
+        viewModelScope.launch { receiveStockAndWait(productName, quantity, cost, supplierName) }
+    }
+
+    suspend fun receiveStockAndWait(
+        productName: String,
+        quantity: String,
+        cost: String,
+        supplierName: String,
+    ): Result<Unit> = runCatching {
+        val product = repository.findProductByName(productName) ?: error("Produto não encontrado.")
+        val supplier = supplierName.trim().takeIf { it.isNotEmpty() }
+            ?.let { repository.findSupplierByName(it) ?: error("Fornecedor não encontrado.") }
+        repository.registerStockReceipt(product.id, quantity.toInt(), cost.toCents(), supplier?.id)
+        Unit
+    }.onSuccess {
+        _message.value = "Entrada de mercadoria salva."
+    }.onFailure {
+        _message.value = it.message ?: "Não foi possível registrar a entrada."
     }
 
     fun clearMessage() {

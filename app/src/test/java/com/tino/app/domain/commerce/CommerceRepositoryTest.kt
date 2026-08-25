@@ -174,6 +174,36 @@ class CommerceRepositoryTest {
     }
 
     @Test
+    fun manualOrderPersistsItemsAndEventWithoutMutatingStock() = runBlocking {
+        repository.createProduct("Café Maratá", 850, 4)
+        val product = database.productDao().all().single()
+
+        repository.createManualOrder(
+            productId = product.id,
+            quantity = 2,
+            customerName = " Maria Lina ",
+            fulfillment = "DELIVERY",
+        )
+
+        val order = database.orderDao().observeAll().first().single()
+        assertEquals("MANUAL", order.channel)
+        assertEquals("DELIVERY", order.fulfillment)
+        assertEquals("Maria Lina", order.customerName)
+        assertEquals("CONFIRMED", order.status)
+        assertEquals(1_700L, order.totalCents)
+        assertEquals(4, database.stockMovementDao().balance(product.id))
+
+        val item = database.orderDao().items(order.id).single()
+        assertEquals(product.id, item.productId)
+        assertEquals(2, item.quantity)
+        assertEquals(850L, item.unitPriceCents)
+        assertTrue(database.domainEventDao().all().any { event ->
+            event.type == "order.created" && event.aggregateId == order.id &&
+                event.payloadJson.contains("\"total_cents\":1700")
+        })
+    }
+
+    @Test
     fun amountOnlyCreditIncreasesReceivableWithoutReceivedOrProductSale() = runBlocking {
         repository.createCustomer("João Ferreira")
         val customerId = database.customerDao().all().single().id

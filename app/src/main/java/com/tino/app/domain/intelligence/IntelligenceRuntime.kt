@@ -129,6 +129,7 @@ object TinoIntelligenceToolRegistry {
         tool("calculate_stock_velocity", "Calcula velocidade de saída em períodos."),
         tool("calculate_stock_coverage", "Calcula cobertura estimada do estoque."),
         tool("calculate_reorder_signal", "Calcula sinal determinístico de reposição."),
+        tool("generate_replenishment_recommendations", "Gera recomendações explicáveis de reposição com fatos locais."),
         tool("compare_stock_levels", "Compara o saldo do estoque em dois momentos."),
         tool("calculate_lowest_stock", "Encontra o menor saldo do catálogo."),
         tool("sort_receivables", "Ordena recebíveis por saldo ou comportamento."),

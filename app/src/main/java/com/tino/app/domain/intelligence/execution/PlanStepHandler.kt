@@ -10,6 +10,7 @@ import java.util.Locale
 data class PlanHandlerContext(
     val facts: IntelligenceFactsPort,
     val analytics: BusinessAnalyticsPort,
+    val recommendationEngine: RecommendationEngine,
     val knowledge: KnowledgeQueryPort,
     val clock: Clock,
     val clarificationPolicy: IntelligenceClarificationPolicy,
@@ -29,6 +30,7 @@ abstract class BasePlanHandler(
 ) : IntelligencePlanHandler {
     protected val facts: IntelligenceFactsPort get() = context.facts
     protected val analytics: BusinessAnalyticsPort get() = context.analytics
+    protected val recommendationEngine: RecommendationEngine get() = context.recommendationEngine
     protected val knowledge: KnowledgeQueryPort get() = context.knowledge
     protected val clock: Clock get() = context.clock
     protected val clarificationPolicy: IntelligenceClarificationPolicy get() = context.clarificationPolicy
@@ -92,4 +94,3 @@ class IntelligenceHandlerRegistry(
                 limitations = listOf("Nenhum handler seguro foi registrado para este objetivo."),
             )
 }
-

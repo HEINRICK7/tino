@@ -212,6 +212,22 @@ class IntelligenceRuntimeTest {
     }
 
     @Test
+    fun replenishmentQuestionUsesLocalFactsAndReturnsExplainableRecommendation() = runBlocking {
+        val response = runtime(
+            products = listOf(IntelligenceProduct("coffee", "Café Maratá", 1_250, 0)),
+            movements = listOf(
+                IntelligenceStockMovement("coffee", -4, "sale", now - 2.days),
+            ),
+        ).execute(request("Quais produtos tenho que comprar?"))
+
+        assertEquals(IntelligenceResponseStatus.ANSWERED, response.status)
+        assertTrue(response.answer.contains("Café Maratá"))
+        assertTrue(response.answer.contains("0 em estoque"))
+        assertTrue(response.plan.contains("generate_replenishment_recommendations"))
+        assertTrue(response.analyticsUsed.contains("replenishment_heuristics"))
+    }
+
+    @Test
     fun gateTwoComposesPaymentMethodWithTotalTrend() = runBlocking {
         var calls = 0
         val response = runtime(

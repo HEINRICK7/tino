@@ -6,6 +6,8 @@ import com.tino.app.domain.intelligence.IntelligenceRequest
 import com.tino.app.domain.intelligence.IntelligenceResponse
 import com.tino.app.domain.intelligence.IntelligenceTextNormalizer
 import com.tino.app.domain.intelligence.KnowledgeQueryPort
+import com.tino.app.domain.intelligence.LocalHeuristicRecommendationEngine
+import com.tino.app.domain.intelligence.RecommendationEngine
 import com.tino.app.domain.intelligence.clarification.DeterministicClarificationPolicy
 import com.tino.app.domain.intelligence.clarification.IntelligenceClarificationPolicy
 import com.tino.app.domain.intelligence.grounding.DeterministicGroundingComposer
@@ -24,6 +26,7 @@ interface IntelligencePlanExecutor {
 class DeterministicIntelligencePlanExecutor(
     facts: IntelligenceFactsPort,
     analytics: BusinessAnalyticsPort,
+    recommendationEngine: RecommendationEngine = LocalHeuristicRecommendationEngine(),
     knowledge: KnowledgeQueryPort,
     clock: Clock,
     private val clarificationPolicy: IntelligenceClarificationPolicy = DeterministicClarificationPolicy(),
@@ -32,6 +35,7 @@ class DeterministicIntelligencePlanExecutor(
     private val context = PlanHandlerContext(
         facts = facts,
         analytics = analytics,
+        recommendationEngine = recommendationEngine,
         knowledge = knowledge,
         clock = clock,
         clarificationPolicy = clarificationPolicy,

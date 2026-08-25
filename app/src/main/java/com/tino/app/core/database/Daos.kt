@@ -14,6 +14,21 @@ data class ProductSummary(
     val stockQuantity: Int,
 )
 
+data class OrderSummary(
+    val id: String,
+    val channel: String,
+    val fulfillment: String,
+    val customerName: String?,
+    val status: String,
+    val totalCents: Long,
+    val createdAt: Long,
+)
+
+data class OrderDetail(
+    val order: OrderEntity,
+    val items: List<OrderItemEntity>,
+)
+
 @Dao
 interface ProductDao {
     @Query(
@@ -451,6 +466,33 @@ interface PurchaseDao {
     suspend fun clearItems()
 
     @Query("DELETE FROM purchases")
+    suspend fun clear()
+}
+
+@Dao
+interface OrderDao {
+    @Query("SELECT id, channel, fulfillment, customerName, status, totalCents, createdAt FROM orders ORDER BY createdAt DESC")
+    fun observeAll(): Flow<List<OrderSummary>>
+
+    @Insert
+    suspend fun insert(order: OrderEntity)
+
+    @Insert
+    suspend fun insertItems(items: List<OrderItemEntity>)
+
+    @Query("SELECT * FROM orders WHERE id = :id LIMIT 1")
+    suspend fun findById(id: String): OrderEntity?
+
+    @Query("SELECT * FROM order_items WHERE orderId = :orderId ORDER BY lineNumber")
+    suspend fun items(orderId: String): List<OrderItemEntity>
+
+    @Query("UPDATE orders SET status = :status WHERE id = :orderId")
+    suspend fun updateStatus(orderId: String, status: String)
+
+    @Query("DELETE FROM order_items")
+    suspend fun clearItems()
+
+    @Query("DELETE FROM orders")
     suspend fun clear()
 }
 

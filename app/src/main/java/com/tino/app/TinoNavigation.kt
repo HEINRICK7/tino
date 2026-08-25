@@ -72,6 +72,7 @@ import com.tino.app.core.database.CustomerBalance
 import com.tino.app.core.database.ProductSummary
 import com.tino.app.core.database.StoreProfileEntity
 import com.tino.app.core.database.SupplierEntity
+import com.tino.app.core.database.OrderSummary
 import com.tino.fiscal.core.ProductImportResult
 import com.tino.app.R
 import com.tino.app.feature.home.TinoViewModel
@@ -181,7 +182,7 @@ internal enum class TinoScreen {
     CreditList, Customers, CustomerDetail, CustomerAccount, ReceivePayment,
     Products, ProductDetail, AdjustStock, NewProduct,
     StockEntry, FiscalFound, FiscalReview, DocumentCamera, DocumentUpload, PurchaseSuggestions, SupplierOrder, Suppliers,
-    Orders, OrderDetail, Picking, Delivery,
+    Orders, NewOrder, OrderDetail, Picking, Delivery,
     Insights, DailySummary, AskTino, SyncDetails, More, Settings, A2uiValidation, G311MutationSafety, G312Memory, G4AgentLoop, G5BusinessMemory,
     BusinessProfileSettings,
     Offline, VoiceError, Ambiguity, Notification,
@@ -191,6 +192,8 @@ internal enum class TinoScreen {
 internal fun TinoScreen.requiredCapability(): TinoCapabilityId? = when (this) {
     TinoScreen.QuickSale,
     TinoScreen.ReceiveSale,
+    TinoScreen.Orders,
+    TinoScreen.NewOrder,
     -> TinoCapabilityId.NAVIGATE
     TinoScreen.Products,
     TinoScreen.ProductDetail,
@@ -246,6 +249,8 @@ internal fun MainShell(
     todaySales: Int,
     pendingSyncCount: Int,
     suppliers: List<SupplierEntity>,
+    orders: List<OrderSummary>,
+    orderDetail: com.tino.app.core.database.OrderDetail?,
     storeProfile: StoreProfileEntity?,
     voiceState: VoiceUiState,
     contextualVoiceState: ContextualVoiceState,
@@ -278,15 +283,18 @@ internal fun MainShell(
     onAgenticCapabilityActivate: (TinoCapabilityId) -> Unit = {},
     businessProfile: BusinessProfile? = null,
     activeCapabilities: Set<TinoCapabilityId> = TinoCapabilityId.values().toSet(),
-    onUpdateBusinessProfile: (BusinessProfile) -> Unit = {},
-    onAddProduct: (String, String, String) -> Unit,
-    onSell: (ProductSummary, Int, PaymentMethod) -> Unit,
+    onUpdateBusinessProfile: suspend (BusinessProfile) -> Result<Unit> = { Result.success(Unit) },
+    onAddProduct: suspend (String, String, String) -> Result<Unit>,
+    onSell: suspend (ProductSummary, Int, PaymentMethod) -> Result<Unit>,
     onAddCustomer: (String, String?) -> Unit,
     onUpdateCustomer: (CustomerBalance, String, String?) -> Unit,
-    onCreditSale: (ProductSummary, String, Int) -> Unit,
-    onReceivePayment: (CustomerBalance, String) -> Unit,
-    onReceiveStock: (String, String, String, String) -> Unit,
-    onAddSupplier: (String, String?) -> Unit,
+    onCreditSale: suspend (ProductSummary, String, Int) -> Result<Unit>,
+    onReceivePayment: suspend (CustomerBalance, String) -> Result<Unit>,
+    onReceiveStock: suspend (String, String, String, String) -> Result<Unit>,
+    onAddSupplier: suspend (String, String?) -> Result<Unit>,
+    onCreateOrder: suspend (String, Int, String?, String) -> Result<Unit>,
+    onOpenOrder: (String) -> Unit,
+    onUpdateOrderStatus: suspend (String, String) -> Result<Unit>,
     onFiscalDocumentProcessed: (ProductImportResult, String?) -> Unit,
     onFiscalImageSelected: (Uri) -> Unit,
 ) {
@@ -531,10 +539,11 @@ internal fun MainShell(
                     onVoiceStart = { onContextualVoiceStart(VoiceContext.SUPPLIER_CREATE) },
                     onVoiceStop = onContextualVoiceStop,
                 )
-                TinoScreen.Orders -> OrdersScreen(onNavigate)
-                TinoScreen.OrderDetail -> OrderDetailScreen(onNavigate)
-                TinoScreen.Picking -> PickingScreen(onNavigate)
-                TinoScreen.Delivery -> DeliveryScreen(onNavigate)
+                TinoScreen.Orders -> OrdersScreen(orders, onNavigate, onOpenOrder)
+                TinoScreen.NewOrder -> NewOrderScreen(products, customers, onNavigate, onCreateOrder)
+                TinoScreen.OrderDetail -> OrderDetailScreen(orderDetail, onNavigate, onUpdateOrderStatus)
+                TinoScreen.Picking -> PickingScreen(orderDetail, onNavigate, onUpdateOrderStatus)
+                TinoScreen.Delivery -> DeliveryScreen(orderDetail, onNavigate, onUpdateOrderStatus)
                 TinoScreen.Insights -> InsightsScreen(products, onNavigate)
                 TinoScreen.DailySummary -> DailySummaryScreen(todayTotalCents, todaySales, customers.sumOf { it.balanceCents }, onNavigate)
         TinoScreen.AskTino -> AskTinoScreen(onNavigate)

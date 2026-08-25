@@ -45,6 +45,8 @@ class TinoConverters {
         CreditEntryEntity::class,
         PurchaseEntity::class,
         PurchaseItemEntity::class,
+        OrderEntity::class,
+        OrderItemEntity::class,
         DomainEventEntity::class,
         SyncCursorEntity::class,
         StoreProfileEntity::class,
@@ -57,7 +59,7 @@ class TinoConverters {
         MutationOperationEntity::class,
         BusinessMemoryEntity::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = true,
 )
 @TypeConverters(TinoConverters::class)
@@ -72,6 +74,7 @@ abstract class TinoDatabase : RoomDatabase() {
     abstract fun supplierDao(): SupplierDao
     abstract fun creditDao(): CreditDao
     abstract fun purchaseDao(): PurchaseDao
+    abstract fun orderDao(): OrderDao
     abstract fun fiscalImportDao(): FiscalImportDao
     abstract fun supplierProductMappingDao(): SupplierProductMappingDao
     abstract fun productPurchaseHistoryDao(): ProductPurchaseHistoryDao
@@ -244,5 +247,14 @@ val MIGRATION_15_16 = object : Migration(15, 16) {
     override fun migrate(database: SupportSQLiteDatabase) {
         database.execSQL("ALTER TABLE store_profile ADD COLUMN operationalPatterns TEXT NOT NULL DEFAULT ''")
         database.execSQL("ALTER TABLE store_profile ADD COLUMN permanentCapabilities TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("CREATE TABLE IF NOT EXISTS orders (id TEXT NOT NULL PRIMARY KEY, channel TEXT NOT NULL, fulfillment TEXT NOT NULL, customerName TEXT, addressReference TEXT, status TEXT NOT NULL, totalCents INTEGER NOT NULL, createdAt INTEGER NOT NULL)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_orders_createdAt ON orders(createdAt)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_orders_status ON orders(status)")
+        database.execSQL("CREATE TABLE IF NOT EXISTS order_items (orderId TEXT NOT NULL, lineNumber INTEGER NOT NULL, productId TEXT NOT NULL, productName TEXT NOT NULL, quantity INTEGER NOT NULL, unitPriceCents INTEGER NOT NULL, PRIMARY KEY(orderId, lineNumber))")
     }
 }

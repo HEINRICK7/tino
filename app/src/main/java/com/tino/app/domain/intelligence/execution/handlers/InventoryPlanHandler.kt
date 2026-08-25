@@ -17,6 +17,7 @@ class InventoryPlanHandler(
         IntelligenceGoal.LOWEST_STOCK,
         IntelligenceGoal.STOCK_RISK,
         IntelligenceGoal.STOCK_TREND,
+        IntelligenceGoal.REPLENISHMENT_RECOMMENDATION,
         IntelligenceGoal.INVENTORY,
     )
 
@@ -28,6 +29,7 @@ class InventoryPlanHandler(
         IntelligenceGoal.LOWEST_STOCK -> answerLowestStock()
         IntelligenceGoal.STOCK_RISK -> answerStockRisk(request)
         IntelligenceGoal.STOCK_TREND -> answerStockTrend(request)
+        IntelligenceGoal.REPLENISHMENT_RECOMMENDATION -> answerReplenishment(request)
         IntelligenceGoal.INVENTORY -> answerInventory(request, normalized)
         else -> unsupported()
     }
@@ -84,6 +86,55 @@ class InventoryPlanHandler(
             factsUsed = listOf("products", "stock_movements"),
             analyticsUsed = listOf("stock_velocity", "reorder_signal"),
             confidence = 0.9,
+        )
+    }
+
+    private suspend fun answerReplenishment(request: IntelligenceRequest): IntelligenceResponse {
+        val predictive = PredictiveRecommendationService(
+            facts = facts,
+            analytics = analytics,
+            engine = recommendationEngine,
+        ).generate(request.timestampEpochMs)
+        val actionable = predictive.recommendations.filter {
+            it.type == RecommendationType.STOCKOUT || it.type == RecommendationType.REPLENISHMENT
+        }
+        if (actionable.isEmpty()) {
+            return IntelligenceResponse(
+                status = IntelligenceResponseStatus.ANSWERED,
+                answer = "Não encontrei produtos que precisem de reposição com os dados dos últimos 30 dias.",
+                plan = listOf("search_product", "get_product_stock", "get_stock_movements", "calculate_stock_velocity", "generate_replenishment_recommendations"),
+                toolCalls = listOf(
+                    call("search_product", 1),
+                    call("get_product_stock", 2),
+                    call("get_stock_movements", 3),
+                    call("calculate_stock_velocity", 4),
+                    call("generate_replenishment_recommendations", 5),
+                ),
+                factsUsed = listOf("products", "stock_movements"),
+                analyticsUsed = listOf("stock_velocity", "replenishment_heuristics"),
+                confidence = 0.88,
+                limitations = listOf("A recomendação é conservadora: considera somente estoque zerado ou abaixo da demanda observada."),
+            )
+        }
+        val detail = actionable.joinToString(separator = "; ") { recommendation ->
+            val evidence = recommendation.evidence
+            "${recommendation.message} (${evidence?.stockQuantity ?: "?"} em estoque, ${evidence?.unitsSoldLast30Days ?: "?"} saída(s) em 30 dias)"
+        }
+        return IntelligenceResponse(
+            status = IntelligenceResponseStatus.ANSWERED,
+            answer = "Produtos para repor: $detail.",
+            plan = listOf("search_product", "get_product_stock", "get_stock_movements", "calculate_stock_velocity", "generate_replenishment_recommendations"),
+            toolCalls = listOf(
+                call("search_product", 1),
+                call("get_product_stock", 2),
+                call("get_stock_movements", 3),
+                call("calculate_stock_velocity", 4),
+                call("generate_replenishment_recommendations", 5),
+            ),
+            factsUsed = listOf("products", "stock_movements"),
+            analyticsUsed = listOf("stock_velocity", "replenishment_heuristics"),
+            confidence = actionable.minOf { it.confidence },
+            limitations = listOf("A recomendação é baseada em fatos locais e na demanda observada nos últimos 30 dias; não é uma ordem de compra."),
         )
     }
 

@@ -61,7 +61,7 @@ class TinoConverters {
         RecommendationEntity::class,
         RecommendationOutcomeEntity::class,
     ],
-    version = 19,
+    version = 20,
     exportSchema = true,
 )
 @TypeConverters(TinoConverters::class)
@@ -280,5 +280,13 @@ val MIGRATION_18_19 = object : Migration(18, 19) {
         )
         database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_recommendation_outcomes_recommendationId_outcome ON recommendation_outcomes(recommendationId, outcome)")
         database.execSQL("CREATE INDEX IF NOT EXISTS index_recommendation_outcomes_occurredAtEpochMs ON recommendation_outcomes(occurredAtEpochMs)")
+    }
+}
+
+val MIGRATION_19_20 = object : Migration(19, 20) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("ALTER TABLE recommendations ADD COLUMN quality TEXT NOT NULL DEFAULT 'COMPLETE'")
+        database.execSQL("ALTER TABLE recommendations ADD COLUMN featureVersion TEXT NOT NULL DEFAULT 'inventory-features-v1'")
+        database.execSQL("ALTER TABLE recommendations ADD COLUMN modelVersion TEXT NOT NULL DEFAULT 'local-heuristic-v1'")
     }
 }

@@ -273,6 +273,12 @@ interface RecommendationDao {
     @Query("SELECT * FROM recommendations WHERE decision = 'PENDING' ORDER BY createdAtEpochMs DESC")
     fun observePending(): Flow<List<RecommendationEntity>>
 
+    @Query("SELECT id FROM recommendations WHERE decision = 'PENDING' AND createdAtEpochMs < :beforeEpochMs")
+    suspend fun stalePendingIds(beforeEpochMs: Long): List<String>
+
+    @Query("UPDATE recommendations SET decision = 'EXPIRED' WHERE decision = 'PENDING' AND createdAtEpochMs < :beforeEpochMs")
+    suspend fun expirePending(beforeEpochMs: Long): Int
+
     @Query("UPDATE recommendations SET decision = :decision WHERE id = :id")
     suspend fun updateDecision(id: String, decision: String): Int
 

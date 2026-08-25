@@ -22,6 +22,24 @@ class RecommendationsTest {
         assertTrue(output.all { it.decision == RecommendationDecision.PENDING })
         assertEquals("stock_zero_with_recent_sales", output.first { it.type == RecommendationType.STOCKOUT }.evidence?.rule)
         assertEquals(12, output.first { it.type == RecommendationType.STOCKOUT }.evidence?.unitsSoldLast30Days)
+        assertEquals(MODEL_VERSION, output.first { it.type == RecommendationType.STOCKOUT }.modelVersion)
+    }
+
+    @Test
+    fun incompleteHistoryDoesNotCreatePredictiveFalsePositive() {
+        val output = LocalHeuristicRecommendationEngine().generate(
+            listOf(
+                InventorySignal(
+                    productId = "p1",
+                    productName = "Produto novo",
+                    stockQuantity = 30,
+                    unitsSoldLast30Days = 0,
+                    featureQuality = FeatureQuality.INSUFFICIENT,
+                ),
+            ),
+        )
+
+        assertTrue(output.isEmpty())
     }
 
     @Test
@@ -71,6 +89,8 @@ class RecommendationsTest {
             updatedDecision = decision
             return null
         }
+
+        override suspend fun expirePending(beforeEpochMs: Long): Int = 0
 
         override suspend fun recordOutcome(
             recommendationId: String,

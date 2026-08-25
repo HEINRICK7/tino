@@ -9,6 +9,7 @@ import com.tino.app.domain.intelligence.RecommendationOutcome
 import com.tino.app.domain.intelligence.RecommendationOutcomeMetrics
 import com.tino.app.domain.intelligence.RecommendationRepository
 import com.tino.app.domain.intelligence.RecommendationType
+import com.tino.app.domain.intelligence.FeatureQuality
 import java.time.Instant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -51,6 +52,14 @@ class RoomRecommendationRepository @Inject constructor(
                 ),
             )
         }
+    }
+
+    override suspend fun expirePending(beforeEpochMs: Long): Int {
+        val staleIds = dao.stalePendingIds(beforeEpochMs)
+        if (staleIds.isEmpty()) return 0
+        val expired = dao.expirePending(beforeEpochMs)
+        staleIds.forEach { id -> recordOutcome(id, RecommendationOutcome.EXPIRED) }
+        return expired
     }
 
     override suspend fun recordOutcome(
@@ -97,6 +106,9 @@ class RoomRecommendationRepository @Inject constructor(
         unitsSoldLast30Days = evidence?.unitsSoldLast30Days,
         rule = evidence?.rule,
         windowDays = evidence?.windowDays,
+        quality = evidence?.quality?.name ?: FeatureQuality.INSUFFICIENT.name,
+        featureVersion = evidence?.featureVersion ?: "inventory-features-v1",
+        modelVersion = modelVersion,
     )
 
     private fun RecommendationEntity.toDomain() = Recommendation(
@@ -110,7 +122,15 @@ class RoomRecommendationRepository @Inject constructor(
             .getOrDefault(RecommendationDecision.PENDING),
         createdAt = Instant.ofEpochMilli(createdAtEpochMs),
         evidence = if (stockQuantity != null && unitsSoldLast30Days != null && rule != null) {
-            RecommendationEvidence(stockQuantity, unitsSoldLast30Days, rule, windowDays ?: 30)
+            RecommendationEvidence(
+                stockQuantity = stockQuantity,
+                unitsSoldLast30Days = unitsSoldLast30Days,
+                rule = rule,
+                windowDays = windowDays ?: 30,
+                quality = runCatching { FeatureQuality.valueOf(quality) }.getOrDefault(FeatureQuality.INSUFFICIENT),
+                featureVersion = featureVersion,
+            )
         } else null,
+        modelVersion = modelVersion,
     )
 }

@@ -8,7 +8,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 enum class RecommendationType { STOCKOUT, REPLENISHMENT, SLOW_MOVING, RECURRENCE }
-enum class RecommendationDecision { PENDING, ACCEPTED, REJECTED }
+enum class RecommendationDecision { PENDING, ACCEPTED, REJECTED, EXPIRED }
+enum class FeatureQuality { COMPLETE, PARTIAL, INSUFFICIENT }
 enum class RecommendationOutcome {
     SHOWN,
     ACCEPTED,
@@ -23,6 +24,8 @@ data class InventorySignal(
     val productName: String,
     val stockQuantity: Int,
     val unitsSoldLast30Days: Int,
+    val featureQuality: FeatureQuality = FeatureQuality.COMPLETE,
+    val featureVersion: String = FEATURE_VERSION,
 )
 
 data class RecommendationEvidence(
@@ -30,6 +33,8 @@ data class RecommendationEvidence(
     val unitsSoldLast30Days: Int,
     val rule: String,
     val windowDays: Int = 30,
+    val quality: FeatureQuality = FeatureQuality.COMPLETE,
+    val featureVersion: String = FEATURE_VERSION,
 )
 
 data class Recommendation(
@@ -41,6 +46,7 @@ data class Recommendation(
     val decision: RecommendationDecision = RecommendationDecision.PENDING,
     val createdAt: Instant = Instant.now(),
     val evidence: RecommendationEvidence? = null,
+    val modelVersion: String = MODEL_VERSION,
 )
 
 data class RecommendationOutcomeMetrics(
@@ -58,6 +64,7 @@ interface RecommendationRepository {
     suspend fun pending(): List<Recommendation>
     fun observePending(): Flow<List<Recommendation>>
     suspend fun updateDecision(id: String, decision: RecommendationDecision): Recommendation?
+    suspend fun expirePending(beforeEpochMs: Long): Int
     suspend fun recordOutcome(
         recommendationId: String,
         outcome: RecommendationOutcome,
@@ -71,6 +78,7 @@ object NoOpRecommendationRepository : RecommendationRepository {
     override suspend fun pending(): List<Recommendation> = emptyList()
     override fun observePending(): Flow<List<Recommendation>> = emptyFlow()
     override suspend fun updateDecision(id: String, decision: RecommendationDecision): Recommendation? = null
+    override suspend fun expirePending(beforeEpochMs: Long): Int = 0
     override suspend fun recordOutcome(
         recommendationId: String,
         outcome: RecommendationOutcome,
@@ -83,7 +91,8 @@ object NoOpRecommendationRepository : RecommendationRepository {
 class LocalHeuristicRecommendationEngine @Inject constructor() : RecommendationEngine {
     override fun generate(signals: List<InventorySignal>): List<Recommendation> = signals.flatMap { signal ->
         val recommendations = mutableListOf<Recommendation>()
-        if (signal.stockQuantity == 0 && signal.unitsSoldLast30Days > 0) {
+        val usableSignal = signal.featureQuality != FeatureQuality.INSUFFICIENT
+        if (usableSignal && signal.stockQuantity == 0 && signal.unitsSoldLast30Days > 0) {
             recommendations += Recommendation(
                 id = UuidV7.new(),
                 type = RecommendationType.STOCKOUT,
@@ -94,9 +103,13 @@ class LocalHeuristicRecommendationEngine @Inject constructor() : RecommendationE
                     stockQuantity = signal.stockQuantity,
                     unitsSoldLast30Days = signal.unitsSoldLast30Days,
                     rule = "stock_zero_with_recent_sales",
+                    quality = signal.featureQuality,
+                    featureVersion = signal.featureVersion,
                 ),
             )
-        } else if (signal.unitsSoldLast30Days > 0 && signal.stockQuantity * 30 < signal.unitsSoldLast30Days) {
+        } else if (signal.featureQuality == FeatureQuality.COMPLETE &&
+            signal.unitsSoldLast30Days > 0 && signal.stockQuantity * 30 < signal.unitsSoldLast30Days
+        ) {
             recommendations += Recommendation(
                 id = UuidV7.new(),
                 type = RecommendationType.REPLENISHMENT,
@@ -107,10 +120,12 @@ class LocalHeuristicRecommendationEngine @Inject constructor() : RecommendationE
                     stockQuantity = signal.stockQuantity,
                     unitsSoldLast30Days = signal.unitsSoldLast30Days,
                     rule = "stock_below_thirty_day_demand",
+                    quality = signal.featureQuality,
+                    featureVersion = signal.featureVersion,
                 ),
             )
         }
-        if (signal.stockQuantity >= 18 && signal.unitsSoldLast30Days <= 3) {
+        if (signal.featureQuality == FeatureQuality.COMPLETE && signal.stockQuantity >= 18 && signal.unitsSoldLast30Days <= 3) {
             recommendations += Recommendation(
                 id = UuidV7.new(),
                 type = RecommendationType.SLOW_MOVING,
@@ -121,6 +136,8 @@ class LocalHeuristicRecommendationEngine @Inject constructor() : RecommendationE
                     stockQuantity = signal.stockQuantity,
                     unitsSoldLast30Days = signal.unitsSoldLast30Days,
                     rule = "high_stock_with_low_recent_sales",
+                    quality = signal.featureQuality,
+                    featureVersion = signal.featureVersion,
                 ),
             )
         }
@@ -134,6 +151,10 @@ data class PredictiveInventoryResult(
     val generatedAt: Instant,
 )
 
+const val FEATURE_VERSION = "inventory-features-v1"
+const val MODEL_VERSION = "local-heuristic-v1"
+const val RECOMMENDATION_TTL_MS = 7L * 24L * 60L * 60L * 1_000L
+
 /**
  * G6.1 boundary: facts and deterministic analytics in, explainable suggestions out.
  * It never writes commerce state and deliberately does not depend on an ML model.
@@ -145,6 +166,7 @@ class PredictiveRecommendationService @Inject constructor(
     private val repository: RecommendationRepository = NoOpRecommendationRepository,
 ) {
     suspend fun generate(nowEpochMs: Long): PredictiveInventoryResult {
+        repository.expirePending(nowEpochMs - RECOMMENDATION_TTL_MS)
         val signals = facts.products().map { product ->
             val velocity = analytics.calculateStockVelocity(
                 product = product,
@@ -156,6 +178,8 @@ class PredictiveRecommendationService @Inject constructor(
                 productName = product.name,
                 stockQuantity = product.stockQuantity,
                 unitsSoldLast30Days = velocity.unitsLastPeriod,
+                featureQuality = velocity.featureQuality,
+                featureVersion = velocity.featureVersion,
             )
         }
         val generated = engine.generate(signals)

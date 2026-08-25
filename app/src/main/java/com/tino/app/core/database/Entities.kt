@@ -187,6 +187,9 @@ data class RecommendationEntity(
     val unitsSoldLast30Days: Int?,
     val rule: String?,
     val windowDays: Int?,
+    val quality: String = "COMPLETE",
+    val featureVersion: String = "inventory-features-v1",
+    val modelVersion: String = "local-heuristic-v1",
 )
 
 @Entity(

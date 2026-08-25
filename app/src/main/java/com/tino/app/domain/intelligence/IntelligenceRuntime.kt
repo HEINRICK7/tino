@@ -292,6 +292,8 @@ data class StockVelocity(
     val unitsPreviousPeriod: Int,
     val daysOfCoverage: Double?,
     val variationPercent: Double?,
+    val featureQuality: FeatureQuality = FeatureQuality.COMPLETE,
+    val featureVersion: String = FEATURE_VERSION,
 )
 
 interface BusinessAnalyticsPort {
@@ -343,6 +345,13 @@ class DeterministicBusinessAnalytics @Inject constructor() : BusinessAnalyticsPo
             .coerceAtLeast(0)
         val current = soldBetween(currentStart, nowEpochMs)
         val previous = soldBetween(previousStart, currentStart)
+        val hasCurrentWindowData = movements.any { it.occurredAtEpochMs in currentStart until nowEpochMs }
+        val hasPreviousWindowData = movements.any { it.occurredAtEpochMs in previousStart until currentStart }
+        val quality = when {
+            !hasCurrentWindowData && !hasPreviousWindowData -> FeatureQuality.INSUFFICIENT
+            hasPreviousWindowData -> FeatureQuality.COMPLETE
+            else -> FeatureQuality.PARTIAL
+        }
         val dailyRate = current / 30.0
         val variation = if (previous == 0) null else ((current - previous).toDouble() / previous) * 100.0
         return StockVelocity(
@@ -351,6 +360,8 @@ class DeterministicBusinessAnalytics @Inject constructor() : BusinessAnalyticsPo
             unitsPreviousPeriod = previous,
             daysOfCoverage = dailyRate.takeIf { it > 0 }?.let { product.stockQuantity / it },
             variationPercent = variation,
+            featureQuality = quality,
+            featureVersion = FEATURE_VERSION,
         )
     }
 }

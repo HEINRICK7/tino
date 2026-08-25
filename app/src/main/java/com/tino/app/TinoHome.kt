@@ -154,6 +154,9 @@ import com.tino.app.domain.profile.BusinessVertical
 import com.tino.app.domain.profile.HomeActionId
 import com.tino.app.domain.profile.HomeConfiguration
 import com.tino.app.domain.profile.VerticalPresetCatalog
+import com.tino.app.domain.intelligence.Recommendation
+import com.tino.app.domain.intelligence.RecommendationDecision
+import com.tino.app.domain.intelligence.RecommendationType
 import com.tino.app.domain.language.EntityReference
 import com.tino.app.domain.language.LanguageEntityType
 import dagger.hilt.android.AndroidEntryPoint
@@ -192,6 +195,8 @@ internal fun HomeScreen(
     onAgenticCapabilityActivate: (TinoCapabilityId) -> Unit = {},
     onQuickQueryOpen: () -> Unit = {},
     businessProfile: BusinessProfile? = null,
+    recommendations: List<Recommendation> = emptyList(),
+    onRecommendationDecision: (Recommendation, Boolean) -> Unit = { _, _ -> },
 ) {
     var queryText by remember { mutableStateOf("") }
     var keyboardInputVisible by remember { mutableStateOf(false) }
@@ -272,6 +277,11 @@ internal fun HomeScreen(
                 repeat(3 - rowActions.size) { Spacer(Modifier.weight(1f)) }
             }
         }
+        HomeRecommendations(
+            recommendations = recommendations,
+            onDecision = onRecommendationDecision,
+            onOpenStock = { onNavigate(TinoScreen.Products) },
+        )
         if ((homeConfiguration.has(HomeActionId.SALES) && (todayTotal > 0L || todayReceived > 0L)) ||
             (homeConfiguration.has(HomeActionId.CREDIT) && creditTotal > 0L)
         ) {
@@ -284,6 +294,73 @@ internal fun HomeScreen(
                 showCredit = homeConfiguration.has(HomeActionId.CREDIT),
                 onClick = { onNavigate(TinoScreen.DailySummary) },
             )
+        }
+    }
+}
+
+@Composable
+private fun HomeRecommendations(
+    recommendations: List<Recommendation>,
+    onDecision: (Recommendation, Boolean) -> Unit,
+    onOpenStock: () -> Unit,
+) {
+    val visible = recommendations
+        .filter { it.decision == RecommendationDecision.PENDING }
+        .take(2)
+    if (visible.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
+        TinoSectionHeader(
+            title = "Sugestões do TINO",
+            actionLabel = "Ver estoque",
+            onAction = onOpenStock,
+        )
+        visible.forEach { recommendation ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = TinoShapes.small,
+                colors = CardDefaults.cardColors(
+                    containerColor = if (recommendation.type == RecommendationType.STOCKOUT) {
+                        com.tino.app.ui.theme.TinoAmberContainer
+                    } else {
+                        TinoSurface
+                    },
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(TinoSpacing.md),
+                    verticalArrangement = Arrangement.spacedBy(TinoSpacing.xs),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(TinoIcons.Warning, contentDescription = "Sugestão", tint = TinoOrange, modifier = Modifier.size(TinoSize.iconNormal))
+                        Text(
+                            recommendation.message,
+                            modifier = Modifier.weight(1f).padding(start = TinoSpacing.sm),
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    recommendation.evidence?.let { evidence ->
+                        Text(
+                            "${evidence.stockQuantity} em estoque · ${evidence.unitsSoldLast30Days} saída(s) em 30 dias",
+                            color = TinoMuted,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = { onDecision(recommendation, false) }) {
+                            Text("IGNORAR", color = TinoMuted)
+                        }
+                        TextButton(onClick = { onDecision(recommendation, true) }) {
+                            Text("ACEITAR", color = TinoGreen)
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.emptyFlow
 
 class RecommendationsTest {
     @Test
@@ -49,6 +50,7 @@ class RecommendationsTest {
 
         override suspend fun saveAll(recommendations: List<Recommendation>) = Unit
         override suspend fun pending(): List<Recommendation> = emptyList()
+        override fun observePending() = emptyFlow<List<Recommendation>>()
         override suspend fun updateDecision(id: String, decision: RecommendationDecision): Recommendation? {
             updatedId = id
             updatedDecision = decision

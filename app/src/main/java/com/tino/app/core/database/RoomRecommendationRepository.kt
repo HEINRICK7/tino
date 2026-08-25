@@ -8,6 +8,8 @@ import com.tino.app.domain.intelligence.RecommendationEvidence
 import com.tino.app.domain.intelligence.RecommendationRepository
 import com.tino.app.domain.intelligence.RecommendationType
 import java.time.Instant
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -31,6 +33,10 @@ class RoomRecommendationRepository @Inject constructor(
     }
 
     override suspend fun pending(): List<Recommendation> = dao.pending().map { it.toDomain() }
+
+    override fun observePending(): Flow<List<Recommendation>> = dao.observePending().map { values ->
+        values.map { it.toDomain() }
+    }
 
     override suspend fun updateDecision(id: String, decision: RecommendationDecision): Recommendation? {
         if (dao.updateDecision(id, decision.name) == 0) return null

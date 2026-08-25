@@ -2,6 +2,8 @@ package com.tino.app.domain.intelligence
 
 import com.tino.app.core.common.UuidV7
 import java.time.Instant
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -40,12 +42,14 @@ interface RecommendationEngine {
 interface RecommendationRepository {
     suspend fun saveAll(recommendations: List<Recommendation>)
     suspend fun pending(): List<Recommendation>
+    fun observePending(): Flow<List<Recommendation>>
     suspend fun updateDecision(id: String, decision: RecommendationDecision): Recommendation?
 }
 
 object NoOpRecommendationRepository : RecommendationRepository {
     override suspend fun saveAll(recommendations: List<Recommendation>) = Unit
     override suspend fun pending(): List<Recommendation> = emptyList()
+    override fun observePending(): Flow<List<Recommendation>> = emptyFlow()
     override suspend fun updateDecision(id: String, decision: RecommendationDecision): Recommendation? = null
 }
 
@@ -108,7 +112,7 @@ data class PredictiveInventoryResult(
  * G6.1 boundary: facts and deterministic analytics in, explainable suggestions out.
  * It never writes commerce state and deliberately does not depend on an ML model.
  */
-class PredictiveRecommendationService(
+class PredictiveRecommendationService @Inject constructor(
     private val facts: IntelligenceFactsPort,
     private val analytics: BusinessAnalyticsPort,
     private val engine: RecommendationEngine,

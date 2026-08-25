@@ -90,6 +90,7 @@ import com.tino.app.domain.voice.VoiceContext
 import com.tino.app.ui.a2ui.TinoA2UiRenderer
 import com.tino.app.domain.commerce.PaymentMethod
 import com.tino.app.domain.commerce.CustomerCreditTimeline
+import com.tino.app.domain.intelligence.Recommendation
 import com.tino.app.ui.components.TinoBottomNavigation
 import com.tino.app.ui.components.TinoCard
 import com.tino.app.ui.components.TinoCustomerRow
@@ -282,6 +283,8 @@ internal fun MainShell(
     onAgenticCapabilityUseOnce: () -> Unit = {},
     onAgenticCapabilityActivate: (TinoCapabilityId) -> Unit = {},
     businessProfile: BusinessProfile? = null,
+    recommendations: List<Recommendation> = emptyList(),
+    onRecommendationDecision: (Recommendation, Boolean) -> Unit = { _, _ -> },
     activeCapabilities: Set<TinoCapabilityId> = TinoCapabilityId.values().toSet(),
     onUpdateBusinessProfile: suspend (BusinessProfile) -> Result<Unit> = { Result.success(Unit) },
     onAddProduct: suspend (String, String, String) -> Result<Unit>,
@@ -401,6 +404,8 @@ internal fun MainShell(
                     onAgenticCapabilityActivate = onAgenticCapabilityActivate,
                     onQuickQueryOpen = { onNavigate(TinoScreen.QuickQueries) },
                     businessProfile = businessProfile,
+                    recommendations = recommendations,
+                    onRecommendationDecision = onRecommendationDecision,
                 )
                 TinoScreen.QuickQueries -> QuickQueriesScreen(
                     state = agenticVoiceState,

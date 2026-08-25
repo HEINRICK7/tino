@@ -265,6 +265,9 @@ interface RecommendationDao {
     @Query("SELECT * FROM recommendations WHERE decision = 'PENDING' ORDER BY createdAtEpochMs DESC")
     suspend fun pending(): List<RecommendationEntity>
 
+    @Query("SELECT * FROM recommendations WHERE decision = 'PENDING' ORDER BY createdAtEpochMs DESC")
+    fun observePending(): Flow<List<RecommendationEntity>>
+
     @Query("UPDATE recommendations SET decision = :decision WHERE id = :id")
     suspend fun updateDecision(id: String, decision: String): Int
 

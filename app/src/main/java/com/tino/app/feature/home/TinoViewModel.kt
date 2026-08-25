@@ -20,6 +20,10 @@ import com.tino.app.domain.profile.TinoModuleRegistry
 import com.tino.app.domain.usecase.ObserveProductsUseCase
 import com.tino.app.domain.usecase.RegisterCreditPaymentCommand
 import com.tino.app.domain.usecase.RegisterCreditPaymentUseCase
+import com.tino.app.domain.intelligence.PredictiveRecommendationService
+import com.tino.app.domain.intelligence.Recommendation
+import com.tino.app.domain.intelligence.RecommendationDecision
+import com.tino.app.domain.intelligence.RecommendationRepository
 import com.tino.app.core.common.UuidV7
 import com.tino.app.core.database.StoreProfileEntity
 import com.tino.app.core.observability.AuditEventType
@@ -41,6 +45,8 @@ class TinoViewModel @Inject constructor(
     private val observeProducts: ObserveProductsUseCase,
     private val registerCreditPayment: RegisterCreditPaymentUseCase,
     private val auditLogger: AuditLogger,
+    private val recommendationRepository: RecommendationRepository,
+    private val predictiveRecommendations: PredictiveRecommendationService,
 ) : ViewModel() {
     private val _products = MutableStateFlow<List<ProductSummary>>(emptyList())
     val products: StateFlow<List<ProductSummary>> = _products.asStateFlow()
@@ -90,6 +96,9 @@ class TinoViewModel @Inject constructor(
     private val _businessProfile = MutableStateFlow<BusinessProfile?>(null)
     val businessProfile: StateFlow<BusinessProfile?> = _businessProfile.asStateFlow()
 
+    private val _recommendations = MutableStateFlow<List<Recommendation>>(emptyList())
+    val recommendations: StateFlow<List<Recommendation>> = _recommendations.asStateFlow()
+
     init {
         viewModelScope.launch {
             observeProducts().collect { products ->
@@ -131,6 +140,21 @@ class TinoViewModel @Inject constructor(
                     )
                 }
             }
+        }
+        viewModelScope.launch {
+            recommendationRepository.observePending().collect { _recommendations.value = it }
+        }
+        viewModelScope.launch {
+            runCatching { predictiveRecommendations.generate(System.currentTimeMillis()) }
+        }
+    }
+
+    fun decideRecommendation(recommendation: Recommendation, accepted: Boolean) {
+        viewModelScope.launch {
+            recommendationRepository.updateDecision(
+                recommendation.id,
+                if (accepted) RecommendationDecision.ACCEPTED else RecommendationDecision.REJECTED,
+            )
         }
     }
 

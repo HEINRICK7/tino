@@ -171,6 +171,7 @@ import com.tino.app.domain.profile.OperationalPatternCatalog
 import com.tino.app.domain.agent.TinoCapabilityRegistry
 import com.tino.app.domain.agent.FastNavigationTarget
 import com.tino.app.domain.agent.requiredCapability
+import com.tino.app.domain.intelligence.Recommendation
 import com.tino.app.domain.language.EntityReference
 import com.tino.app.domain.language.LanguageEntityType
 import dagger.hilt.android.AndroidEntryPoint
@@ -203,6 +204,7 @@ internal fun TinoApp(
     val storeProfile by viewModel.storeProfile.collectAsStateWithLifecycle()
     val profileLoaded by viewModel.profileLoaded.collectAsStateWithLifecycle()
     val businessProfile by viewModel.businessProfile.collectAsStateWithLifecycle()
+    val recommendations by viewModel.recommendations.collectAsStateWithLifecycle()
     val businessContext = businessProfile?.let { DefaultBusinessContextResolver().resolve(it) }
     val activeCapabilities = businessContext?.capabilities.orEmpty()
     var screen by remember { mutableStateOf(TinoScreen.Splash) }
@@ -387,6 +389,8 @@ internal fun TinoApp(
                     }
                 },
                 businessProfile = businessProfile,
+                recommendations = recommendations,
+                onRecommendationDecision = viewModel::decideRecommendation,
                 activeCapabilities = activeCapabilities,
                 onUpdateBusinessProfile = viewModel::updateBusinessProfileAndWait,
                 onAddProduct = viewModel::addProductAndWait,

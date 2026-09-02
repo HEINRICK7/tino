@@ -31,12 +31,12 @@ class IntelligenceTelemetryPersistenceTest {
                     id = "telemetry-1",
                     requestId = "request-1",
                     sessionId = "session-1",
-                    plannerSelected = "ADK",
-                    plannerUsed = "adk-fallback",
-                    fallbackReason = "adk_no_plan",
+                    plannerSelected = "DETERMINISTIC",
+                    plannerUsed = "DETERMINISTIC",
+                    fallbackReason = null,
                     plan = listOf("get_receivables", "sort_receivables"),
                     validationResult = IntelligenceValidationResult.ACCEPTED,
-                    fallbackUsed = true,
+                    fallbackUsed = false,
                     executionResult = IntelligenceExecutionResult.SUCCEEDED,
                     groundingCompleteness = com.tino.app.domain.intelligence.IntelligenceGroundingCompleteness.COMPLETE,
                     latencyMs = 42L,
@@ -49,10 +49,10 @@ class IntelligenceTelemetryPersistenceTest {
             val restored = repository.recent().single()
             assertEquals("request-1", restored.requestId)
             assertEquals("session-1", restored.sessionId)
-            assertEquals("ADK", restored.plannerSelected)
-            assertEquals("adk_no_plan", restored.fallbackReason)
+            assertEquals("DETERMINISTIC", restored.plannerSelected)
+            assertEquals(null, restored.fallbackReason)
             assertEquals(listOf("get_receivables", "sort_receivables"), restored.plan)
-            assertTrue(restored.fallbackUsed)
+            assertTrue(!restored.fallbackUsed)
             assertEquals(12L, restored.planningLatencyMs)
         } finally {
             database.close()

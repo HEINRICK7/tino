@@ -6,8 +6,7 @@ import javax.inject.Singleton
 /**
  * Stable domain boundary for language interpretation.
  *
- * The first implementation is deterministic. A future Gemma adapter can
- * implement the same contract and still return references instead of IDs or
+ * The implementation is deterministic and returns references instead of IDs or
  * persisted facts.
  */
 @Singleton

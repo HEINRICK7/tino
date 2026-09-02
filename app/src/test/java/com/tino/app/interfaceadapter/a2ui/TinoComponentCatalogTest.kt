@@ -17,7 +17,12 @@ class TinoComponentCatalogTest {
         assertTrue(TinoComponentCatalog.core.types.contains(CoreTinoComponentCatalog.CONFIRMATION))
         assertEquals("tino.catalog.v1", TinoCatalogVersion.ID)
         assertTrue(TinoComponentCatalog.core.types.contains(TinoCustomComponentCatalog.PRODUCT_CARD))
+        assertTrue(TinoComponentCatalog.core.types.contains(TinoCustomComponentCatalog.CATALOG_CARD))
+        assertTrue(TinoComponentCatalog.core.types.contains(TinoCustomComponentCatalog.CATALOG_LIST_CARD))
         assertTrue(TinoComponentCatalog.core.types.contains(TinoCustomComponentCatalog.QUICK_QUERY_CARD))
+        assertTrue(TinoComponentCatalog.core.types.contains(TinoCustomComponentCatalog.ACTION_LIST_CARD))
+        assertTrue(TinoComponentCatalog.core.types.contains(TinoCustomComponentCatalog.TIMELINE_CARD))
+        assertTrue(TinoComponentCatalog.core.types.contains(TinoCustomComponentCatalog.EMPTY_STATE_CARD))
     }
 
     @Test

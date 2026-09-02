@@ -12,6 +12,8 @@ data class ProductSummary(
     val priceCents: Long,
     val unit: String,
     val stockQuantity: Int,
+    val stockQuantityExact: String = stockQuantity.toString(),
+    val stockTracked: Boolean = true,
 )
 
 data class OrderSummary(
@@ -34,15 +36,21 @@ data class RecommendationOutcomeCountRow(
     val count: Int,
 )
 
+data class AttentionOutcomeCountRow(
+    val outcome: String,
+    val count: Int,
+)
+
 @Dao
 interface ProductDao {
     @Query(
         """
-        SELECT p.id, p.name, p.priceCents, p.unit,
-               COALESCE(SUM(sm.quantityDelta), 0) AS stockQuantity
+        SELECT p.id, p.name, p.priceCents, p.unit, p.stockTracked,
+               COALESCE(SUM(sm.quantityDelta), 0) AS stockQuantity,
+               CAST(COALESCE(SUM(sm.quantityDelta), 0) AS TEXT) AS stockQuantityExact
         FROM products p
         LEFT JOIN stock_movements sm ON sm.productId = p.id
-        GROUP BY p.id, p.name, p.priceCents, p.unit
+        GROUP BY p.id, p.name, p.priceCents, p.unit, p.stockTracked
         ORDER BY p.name
         """,
     )
@@ -60,6 +68,12 @@ interface ProductDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(product: ProductEntity)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertCatalogProduct(product: ProductEntity): Long
+
+    @Query("UPDATE products SET name = :name, priceCents = :priceCents, unit = :unit, gtin = :gtin, stockTracked = :stockTracked WHERE id = :id")
+    suspend fun updateCatalogFields(id: String, name: String, priceCents: Long, unit: String, gtin: String?, stockTracked: Boolean): Int
+
     @Query("UPDATE products SET priceCents = :priceCents WHERE id = :id")
     suspend fun updatePrice(id: String, priceCents: Long)
 
@@ -68,6 +82,83 @@ interface ProductDao {
 
     @Query("DELETE FROM products")
     suspend fun clear()
+}
+
+@Dao
+interface CatalogSyncStateDao {
+    @Query("SELECT * FROM catalog_sync_state WHERE businessId = :businessId LIMIT 1")
+    fun observe(businessId: String): Flow<CatalogSyncStateEntity?>
+
+    @Query("SELECT * FROM catalog_sync_state WHERE businessId = :businessId LIMIT 1")
+    suspend fun find(businessId: String): CatalogSyncStateEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(state: CatalogSyncStateEntity)
+}
+
+@Dao
+interface GoodsReceiptOperationDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(operation: GoodsReceiptOperationEntity): Long
+
+    @Query("SELECT * FROM goods_receipt_operations WHERE businessId = :businessId AND operationType = :operationType AND logicalReference = :logicalReference LIMIT 1")
+    suspend fun find(businessId: String, operationType: String, logicalReference: String): GoodsReceiptOperationEntity?
+
+    @Query("SELECT * FROM goods_receipt_operations WHERE operationId = :operationId LIMIT 1")
+    suspend fun findById(operationId: String): GoodsReceiptOperationEntity?
+
+    @Query("SELECT * FROM goods_receipt_operations WHERE receiptId = :receiptId LIMIT 1")
+    suspend fun findByReceiptId(receiptId: String): GoodsReceiptOperationEntity?
+
+    @Query("SELECT * FROM goods_receipt_operations WHERE businessId = :businessId AND operationType = :operationType AND status = 'PENDING' AND requestJson IS NOT NULL ORDER BY updatedAt LIMIT 1")
+    suspend fun findPendingConfirmation(businessId: String, operationType: String): GoodsReceiptOperationEntity?
+
+    @Query("UPDATE goods_receipt_operations SET documentId = :documentId, previewId = :previewId, status = :status, updatedAt = :updatedAt WHERE operationId = :operationId")
+    suspend fun markRetrieved(operationId: String, documentId: String, previewId: String?, status: String, updatedAt: Long): Int
+
+    @Query("UPDATE goods_receipt_operations SET receiptId = :receiptId, status = :status, updatedAt = :updatedAt WHERE operationId = :operationId")
+    suspend fun markConfirmed(operationId: String, receiptId: String, status: String, updatedAt: Long): Int
+
+    @Query("UPDATE goods_receipt_operations SET status = :status, updatedAt = :updatedAt WHERE operationId = :operationId")
+    suspend fun updateStatus(operationId: String, status: String, updatedAt: Long): Int
+
+    @Query("UPDATE goods_receipt_operations SET requestJson = :requestJson, documentId = COALESCE(documentId, :documentId), previewId = COALESCE(previewId, :previewId), updatedAt = :updatedAt WHERE operationId = :operationId")
+    suspend fun enrich(operationId: String, requestJson: String, documentId: String?, previewId: String?, updatedAt: Long): Int
+}
+
+@Dao
+interface RemoteGoodsReceiptDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(receipt: RemoteGoodsReceiptEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertItems(items: List<RemoteGoodsReceiptItemEntity>)
+
+    @Query("DELETE FROM remote_goods_receipt_items WHERE receiptId = :receiptId")
+    suspend fun deleteItems(receiptId: String)
+
+    @Query("SELECT * FROM remote_goods_receipts WHERE receiptId = :receiptId LIMIT 1")
+    suspend fun find(receiptId: String): RemoteGoodsReceiptEntity?
+
+    @Query("SELECT * FROM remote_goods_receipt_items WHERE receiptId = :receiptId ORDER BY lineNumber")
+    suspend fun items(receiptId: String): List<RemoteGoodsReceiptItemEntity>
+
+    @Query("""
+        SELECT i.* FROM remote_goods_receipt_items i
+        INNER JOIN remote_goods_receipts r ON r.receiptId = i.receiptId
+        WHERE r.businessId = :businessId
+        ORDER BY i.projectedAt, i.receiptId, i.lineNumber
+    """)
+    fun observeItems(businessId: String): Flow<List<RemoteGoodsReceiptItemEntity>>
+}
+
+@Dao
+interface RemoteProductMappingDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(mapping: RemoteProductMappingEntity): Long
+
+    @Query("SELECT * FROM remote_product_mappings WHERE businessId = :businessId AND remoteProductId = :remoteProductId LIMIT 1")
+    suspend fun find(businessId: String, remoteProductId: String): RemoteProductMappingEntity?
 }
 
 @Dao
@@ -231,7 +322,9 @@ interface FinancialProjectionDao {
             COALESCE((SELECT SUM(amountCents) FROM credit_entries), 0)
                 AS totalReceivableCents,
             COALESCE((SELECT SUM(amountCents) FROM credit_entries
-                WHERE type = 'SALE' AND occurredAt >= :startAt AND occurredAt < :endAt), 0)
+                WHERE type = 'SALE'
+                AND (ledgerType IS NULL OR ledgerType = 'PURCHASE')
+                AND occurredAt >= :startAt AND occurredAt < :endAt), 0)
                 AS creditCreatedCents,
             COALESCE((SELECT SUM(-amountCents) FROM credit_entries
                 WHERE type = 'PAYMENT' AND occurredAt >= :startAt AND occurredAt < :endAt), 0)
@@ -290,6 +383,57 @@ interface RecommendationDao {
 
     @Query("SELECT outcome, COUNT(*) AS count FROM recommendation_outcomes GROUP BY outcome")
     fun observeOutcomeCounts(): Flow<List<RecommendationOutcomeCountRow>>
+}
+
+@Dao
+interface AttentionDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(items: List<AttentionEntity>)
+
+    @Query("SELECT * FROM attention_items ORDER BY urgency DESC, relevance DESC, confidence DESC")
+    suspend fun all(): List<AttentionEntity>
+
+    @Query("SELECT * FROM attention_items WHERE id = :id LIMIT 1")
+    suspend fun findById(id: String): AttentionEntity?
+
+    @Query("SELECT * FROM attention_items WHERE state = 'ACTIVE' ORDER BY urgency DESC, relevance DESC, confidence DESC")
+    fun observeActive(): Flow<List<AttentionEntity>>
+
+    @Query("UPDATE attention_items SET state = :state, snoozedUntilEpochMs = :snoozedUntilEpochMs WHERE id = :id")
+    suspend fun updateState(id: String, state: String, snoozedUntilEpochMs: Long?): Int
+
+    @Insert
+    suspend fun insertOutcome(outcome: AttentionOutcomeEntity)
+
+    @Query("SELECT outcome, COUNT(*) AS count FROM attention_outcomes GROUP BY outcome")
+    suspend fun outcomeCounts(): List<AttentionOutcomeCountRow>
+}
+
+@Dao
+interface IntelligenceEvidenceDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(evidence: List<IntelligenceEvidenceEntity>)
+
+    @Query("SELECT * FROM intelligence_evidence ORDER BY detectedAtEpochMs DESC LIMIT :limit")
+    suspend fun list(limit: Int): List<IntelligenceEvidenceEntity>
+
+    @Query("SELECT * FROM intelligence_evidence WHERE id = :id LIMIT 1")
+    suspend fun findById(id: String): IntelligenceEvidenceEntity?
+}
+
+@Dao
+interface ApprovedKnowledgeCatalogDao {
+    @Query("SELECT * FROM approved_knowledge_catalogs WHERE state = 'ACTIVE' LIMIT 1")
+    suspend fun active(): ApprovedKnowledgeCatalogEntity?
+
+    @Query("SELECT * FROM approved_knowledge_catalogs WHERE state = 'PREVIOUS' LIMIT 1")
+    suspend fun previous(): ApprovedKnowledgeCatalogEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: ApprovedKnowledgeCatalogEntity)
+
+    @Query("DELETE FROM approved_knowledge_catalogs")
+    suspend fun clear()
 }
 
 @Dao
@@ -422,7 +566,7 @@ interface CreditDao {
     @Query("SELECT * FROM credit_entries WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): CreditEntryEntity?
 
-    @Query("SELECT * FROM credit_entries WHERE referenceId = :referenceId AND type = 'SALE' LIMIT 1")
+    @Query("SELECT * FROM credit_entries WHERE referenceId = :referenceId AND type = 'SALE' AND (ledgerType IS NULL OR ledgerType = 'REVERSAL') LIMIT 1")
     suspend fun findReversalByReference(referenceId: String): CreditEntryEntity?
 
     @Query(
@@ -493,6 +637,12 @@ interface PurchaseDao {
 
     @Query("SELECT * FROM purchases ORDER BY createdAt DESC")
     suspend fun all(): List<PurchaseEntity>
+
+    @Query("SELECT * FROM purchases ORDER BY createdAt DESC")
+    fun observeAll(): Flow<List<PurchaseEntity>>
+
+    @Query("UPDATE purchases SET status = :status, receivedAt = :receivedAt WHERE id = :purchaseId")
+    suspend fun updateStatus(purchaseId: String, status: PurchaseStatus, receivedAt: Long?)
 
     @Query("SELECT * FROM purchase_items ORDER BY purchaseId, lineNumber")
     suspend fun allItems(): List<PurchaseItemEntity>

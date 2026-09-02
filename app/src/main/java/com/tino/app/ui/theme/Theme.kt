@@ -3,6 +3,7 @@ package com.tino.app.ui.theme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 
 private val TinoLightColors = lightColorScheme(
     primary = TinoGreen,
@@ -24,9 +25,12 @@ private val TinoLightColors = lightColorScheme(
 
 @Composable
 fun TinoTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = TinoLightColors,
-        typography = TinoTypography,
-        content = content,
-    )
+    val reduceMotion = rememberTinoReduceMotion()
+    CompositionLocalProvider(LocalTinoReduceMotion provides reduceMotion) {
+        MaterialTheme(
+            colorScheme = TinoLightColors,
+            typography = TinoTypography,
+            content = content,
+        )
+    }
 }

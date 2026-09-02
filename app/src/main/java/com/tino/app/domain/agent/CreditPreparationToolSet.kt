@@ -11,7 +11,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Framework-independent tool boundary for the Koog/Gemma spike.
+ * Framework-independent tool boundary for credit preparation.
  *
  * The model only supplies textual references. This set resolves them locally
  * and never returns internal IDs. The write tool deliberately stops at a

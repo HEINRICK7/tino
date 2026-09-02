@@ -33,14 +33,14 @@ class TinoUiPlannerTest {
         assertEquals(TinoCatalogVersion.ID, plan.catalogVersion)
         assertEquals(
             listOf(
-                CoreTinoComponentCatalog.TEXT,
-                TinoCustomComponentCatalog.INVENTORY_ALERT_CARD,
-                CoreTinoComponentCatalog.BUTTON,
+                TinoCustomComponentCatalog.CATALOG_LIST_CARD,
             ),
             surface.components.map { it.type },
         )
-        assertEquals("OUT_OF_STOCK", surface.components[1].props["status"])
-        assertTrue(surface.components[2].actions.contains(CoreTinoComponentCatalog.SELECT_TAB.name))
+        assertEquals(1, surface.components.single().items.size)
+        assertEquals("replenishment", surface.components.single().props["variant"])
+        assertEquals("OUT_OF_STOCK", surface.components.single().items.single().status)
+        assertTrue(surface.components.single().actions.contains(CoreTinoComponentCatalog.SELECT_TAB.name))
     }
 
     @Test
@@ -59,7 +59,25 @@ class TinoUiPlannerTest {
 
         assertEquals(TinoCustomComponentCatalog.SUMMARY_CARD, surface.components[0].type)
         assertEquals("R$ 730,00", surface.components[0].props["receivedValue"])
-        assertEquals(2, surface.components.count { it.type == TinoCustomComponentCatalog.DEBT_CARD })
+        assertEquals(TinoCustomComponentCatalog.CATALOG_LIST_CARD, surface.components[1].type)
+        assertEquals("receivables", surface.components[1].props["variant"])
+        assertEquals(2, surface.components[1].items.size)
+    }
+
+    @Test
+    fun customersUseCustomerCardFamilyInsteadOfGenericCatalog() = runBlocking {
+        val surface = planner.compose(
+            TinoUiPlannerResult.Customers(
+                CustomerListResult(
+                    items = listOf(CustomerListItem("c1", "Maria Lina", "86994209350")),
+                ),
+            ),
+            TinoUiPlannerContext(intent = TinoUiIntent.LIST_CUSTOMERS),
+        ).tree.toSurfaceMessage("customers")
+
+        assertEquals(TinoCustomComponentCatalog.CATALOG_LIST_CARD, surface.components.single().type)
+        assertEquals("customers", surface.components.single().props["variant"])
+        assertEquals("Maria Lina", surface.components.single().items.single().title)
     }
 
     @Test

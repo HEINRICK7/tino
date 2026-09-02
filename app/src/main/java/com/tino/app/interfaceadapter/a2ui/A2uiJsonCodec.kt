@@ -439,6 +439,8 @@ object TinoA2UiJsonCodec {
             TinoA2UiComponentCatalog.PRODUCT_STOCK,
             TinoA2UiComponentCatalog.PRODUCT_PRICE,
             TinoA2UiComponentCatalog.CUSTOMER_LIST,
+            TinoA2UiComponentCatalog.CUSTOMER_CONTACT,
+            TinoA2UiComponentCatalog.SUPPLIER_SUMMARY,
             TinoA2UiComponentCatalog.RECEIVABLES_LIST,
             TinoA2UiComponentCatalog.OVERDUE_LIST,
             -> {

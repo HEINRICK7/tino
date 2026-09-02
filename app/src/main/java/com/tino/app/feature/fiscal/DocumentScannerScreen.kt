@@ -22,15 +22,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -41,9 +37,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -51,6 +47,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.tino.app.ui.components.TinoPrimaryButton
+import com.tino.app.ui.components.TinoCard
+import com.tino.app.ui.components.TinoTextAction
 import com.tino.app.ui.components.TinoSecondaryButton
 import com.tino.app.ui.components.TinoTopBar
 import com.tino.app.ui.icons.TinoIcons
@@ -58,6 +56,9 @@ import com.tino.app.ui.theme.TinoGreen
 import com.tino.app.ui.theme.TinoGreenLight
 import com.tino.app.ui.theme.TinoMuted
 import com.tino.app.ui.theme.TinoPaper
+import com.tino.app.ui.theme.TinoShapes
+import com.tino.app.ui.theme.TinoSize
+import com.tino.app.ui.theme.TinoSpacing
 import com.tino.app.ui.theme.TinoSurface
 import com.tino.fiscal.core.CaptureUiState
 import com.tino.fiscal.core.DocumentCaptureGuidance
@@ -95,8 +96,8 @@ fun DocumentScannerScreen(
                     WindowInsetsCompat.Type.systemBars(),
                 )
                 WindowCompat.setDecorFitsSystemWindows(cameraActivity.window, true)
-                cameraActivity.window.statusBarColor = android.graphics.Color.rgb(244, 250, 246)
-                cameraActivity.window.navigationBarColor = android.graphics.Color.rgb(244, 250, 246)
+                cameraActivity.window.statusBarColor = TinoPaper.toArgb()
+                cameraActivity.window.navigationBarColor = TinoPaper.toArgb()
                 WindowInsetsControllerCompat(cameraActivity.window, cameraActivity.window.decorView).apply {
                     isAppearanceLightStatusBars = true
                     isAppearanceLightNavigationBars = true
@@ -246,14 +247,11 @@ fun DocumentScannerScreen(
         )
 
         if (processing) {
-            Card(
-                modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                colors = CardDefaults.cardColors(containerColor = TinoPaper),
-            ) {
+            TinoCard(modifier = Modifier.align(Alignment.Center).padding(TinoSpacing.xl)) {
                 Column(
-                    Modifier.padding(20.dp),
+                    Modifier.padding(TinoSpacing.screen),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(TinoSpacing.md),
                 ) {
                     CircularProgressIndicator(color = TinoGreen)
                     Text("Lendo a nota…", fontWeight = FontWeight.SemiBold)
@@ -265,39 +263,30 @@ fun DocumentScannerScreen(
         Surface(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(16.dp),
-            shape = RoundedCornerShape(50),
+                .padding(TinoSpacing.lg),
+            shape = CircleShape,
             color = Color.Black.copy(alpha = 0.58f),
             contentColor = Color.White,
         ) {
-            TextButton(
-                onClick = onBack,
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    horizontal = 14.dp,
-                    vertical = 4.dp,
-                ),
-                colors = ButtonDefaults.textButtonColors(contentColor = Color.White),
-            ) {
-                Text("FECHAR", fontWeight = FontWeight.SemiBold)
-            }
+            TinoTextAction("FECHAR", onBack, color = Color.White)
         }
 
         Surface(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(72.dp)
-                .padding(horizontal = 20.dp, vertical = 14.dp),
-            shape = RoundedCornerShape(28.dp),
+                .height(TinoSize.cameraControlBarHeight)
+                .padding(horizontal = TinoSpacing.screen, vertical = TinoSpacing.md),
+            shape = TinoShapes.large,
             color = Color.Black.copy(alpha = 0.62f),
             contentColor = Color.White,
         ) {
             Row(
-                modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                modifier = Modifier.padding(start = TinoSpacing.lg, end = TinoSpacing.sm, top = TinoSpacing.sm, bottom = TinoSpacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(TinoSpacing.md),
             ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(TinoSpacing.xxs)) {
                     Text(
                         "Enquadre a nota",
                         color = Color.White,
@@ -315,29 +304,29 @@ fun DocumentScannerScreen(
                         capturePhoto()
                     },
                     modifier = Modifier
-                        .size(52.dp)
-                        .background(TinoGreen, androidx.compose.foundation.shape.CircleShape),
+                        .size(TinoSize.cameraCaptureButton)
+                        .background(TinoGreen, CircleShape),
                         enabled = captureState == CaptureUiState.READY && !capturing && !processing && capturedFile == null,
                 ) {
                     Icon(
                         TinoIcons.Camera,
                         contentDescription = "Capturar tabela",
                         tint = Color.White,
-                        modifier = Modifier.size(26.dp),
+                        modifier = Modifier.size(TinoSize.iconProminent),
                     )
                 }
             }
         }
         if (captureError) {
             Surface(
-                modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp),
-                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = TinoSpacing.xl),
+                shape = TinoShapes.medium,
                 color = Color.Black.copy(alpha = 0.74f),
                 contentColor = Color.White,
             ) {
                 Text(
                     "Não consegui tirar essa foto. Tente novamente.",
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                    modifier = Modifier.padding(horizontal = TinoSpacing.lg, vertical = TinoSpacing.md),
                 )
             }
         }
@@ -365,12 +354,12 @@ private fun CameraPermissionScreen(
 ) {
     Surface(Modifier.fillMaxSize(), color = TinoPaper) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.fillMaxSize().padding(TinoSpacing.screen),
+            verticalArrangement = Arrangement.spacedBy(TinoSpacing.lg),
         ) {
             TinoTopBar("Escanear nota", onBack)
-            Spacer(Modifier.size(12.dp))
-            Icon(TinoIcons.Camera, contentDescription = null, tint = TinoGreen, modifier = Modifier.size(52.dp))
+            Spacer(Modifier.size(TinoSpacing.md))
+            Icon(TinoIcons.Camera, contentDescription = null, tint = TinoGreen, modifier = Modifier.size(TinoSize.cameraPermissionIcon))
             Text("Permita o acesso à câmera", fontWeight = FontWeight.Bold)
             Text(
                 "O TINO usa a câmera para ler a nota e preparar os produtos para conferência. A entrada só é salva depois da sua confirmação.",

@@ -24,6 +24,7 @@ import com.tino.app.domain.agent.CustomerBalanceQueryTool
 import com.tino.app.domain.agent.CustomerTimelineQueryResult
 import com.tino.app.domain.agent.CustomerTimelineQueryTool
 import com.tino.app.domain.agent.TinoAgentBoundary
+import com.tino.app.domain.agent.AgentIntentSchema
 import com.tino.app.domain.finance.FinancialProjectionRepository
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -240,6 +241,110 @@ class EntityResolutionServiceTest {
     }
 
     @Test
+    fun canonicalPaymentBoundaryBuildsPreviewFromRoomAndDoesNotMutateBeforeConfirmation() = runBlocking {
+        repository.createCustomer("Maria Lina")
+        val customerId = database.customerDao().all().single().id
+        repository.registerCreditByAmount(customerId, 10_000L, operationId = "credit-maria-payment")
+        val beforeCredits = database.creditDao().all()
+        val beforeEvents = database.domainEventDao().all()
+        val boundary = TinoAgentBoundary(
+            financialSummaryTool = FinancialSummaryQueryTool(
+                FinancialProjectionRepository(database.financialProjectionDao()),
+                Clock.systemDefaultZone(),
+            ),
+            renderer = AgentSurfaceRenderer(),
+            toolExecutor = CommerceToolDispatcher(repository),
+        )
+
+        val response = boundary.ask(
+            AgentIntent(
+                schemaVersion = AgentIntentSchema.VERSION,
+                capability = AgentCapability.REGISTER_CREDIT_PAYMENT,
+                period = AgentIntentPeriod.TODAY,
+                customerRef = "Maria Lina",
+                amountCents = 2_500L,
+                creditPaymentMethod = PaymentMethod.PIX,
+            ),
+        )
+
+        assertTrue(response is AgentResponse.ActionPreviewReady)
+        val preview = response as AgentResponse.ActionPreviewReady
+        assertTrue(preview.preview.detail.contains("Maria Lina"))
+        assertTrue(preview.preview.detail.contains("R$ 25,00"))
+        assertEquals(beforeCredits, database.creditDao().all())
+        assertEquals(beforeEvents, database.domainEventDao().all())
+    }
+
+    @Test
+    fun canonicalCustomerCreationBuildsConfirmationPreviewWithoutMutatingRoom() = runBlocking {
+        val beforeCustomers = database.customerDao().all()
+        val beforeEvents = database.domainEventDao().all()
+        val boundary = TinoAgentBoundary(
+            financialSummaryTool = FinancialSummaryQueryTool(
+                FinancialProjectionRepository(database.financialProjectionDao()),
+                Clock.systemDefaultZone(),
+            ),
+            renderer = AgentSurfaceRenderer(),
+            toolExecutor = CommerceToolDispatcher(repository),
+        )
+
+        val response = boundary.ask(
+            AgentIntent(
+                schemaVersion = AgentIntentSchema.VERSION,
+                capability = AgentCapability.CREATE_CUSTOMER,
+                period = AgentIntentPeriod.TODAY,
+                customerName = "Maria Lina",
+                customerPhone = "86999990000",
+            ),
+        )
+
+        assertTrue(response is AgentResponse.ActionPreviewReady)
+        val preview = response as AgentResponse.ActionPreviewReady
+        assertEquals(CommerceToolName.CREATE_CUSTOMER, preview.call.name)
+        assertEquals("Maria Lina", preview.call.arguments["name"])
+        assertEquals("86999990000", preview.call.arguments["phone"])
+        assertTrue(preview.preview.detail.contains("Maria Lina"))
+        assertTrue(preview.preview.detail.contains("86999990000"))
+        assertEquals(beforeCustomers, database.customerDao().all())
+        assertEquals(beforeEvents, database.domainEventDao().all())
+    }
+
+    @Test
+    fun canonicalProductPriceUpdateBuildsPreviewFromRoomWithoutMutatingBeforeConfirmation() = runBlocking {
+        repository.createProduct("Café Maratá", priceCents = 850, initialStock = 10)
+        val beforeProducts = database.productDao().all()
+        val beforeEvents = database.domainEventDao().all()
+        val boundary = TinoAgentBoundary(
+            financialSummaryTool = FinancialSummaryQueryTool(
+                FinancialProjectionRepository(database.financialProjectionDao()),
+                Clock.systemDefaultZone(),
+            ),
+            renderer = AgentSurfaceRenderer(),
+            toolExecutor = CommerceToolDispatcher(repository),
+        )
+
+        val response = boundary.ask(
+            AgentIntent(
+                schemaVersion = AgentIntentSchema.VERSION,
+                capability = AgentCapability.UPDATE_PRODUCT_PRICE,
+                period = AgentIntentPeriod.TODAY,
+                productRef = "cafe marata",
+                newPriceCents = 875L,
+            ),
+        )
+
+        assertTrue(response is AgentResponse.ActionPreviewReady)
+        val preview = response as AgentResponse.ActionPreviewReady
+        assertEquals(CommerceToolName.CHANGE_PRODUCT_PRICE, preview.call.name)
+        assertEquals("cafe marata", preview.call.arguments["product"])
+        assertEquals("875", preview.call.arguments["new_price_cents"])
+        assertTrue(preview.preview.detail.contains("R$ 8,50"))
+        assertTrue(preview.preview.detail.contains("R$ 8,75"))
+        assertEquals(beforeProducts, database.productDao().all())
+        assertEquals(beforeEvents, database.domainEventDao().all())
+    }
+
+    @Test
     fun canonicalCustomerBalanceUsesTemporalProjectionWithoutMutation() = runBlocking {
         repository.createCustomer("Maria Lina")
         val customer = database.customerDao().all().single()
@@ -343,6 +448,7 @@ class EntityResolutionServiceTest {
         val tool = CustomerTimelineQueryTool(
             entityResolver = resolver,
             temporalCredit = TemporalCreditService(repository),
+            commerceRepository = repository,
             clock = Clock.systemDefaultZone(),
         )
 
@@ -355,6 +461,49 @@ class EntityResolutionServiceTest {
         assertEquals("-R$ 50,00", result.result.items.first().amountText)
         assertEquals("+R$ 120,00", result.result.items.last().amountText)
         assertEquals(beforeCredits, database.creditDao().all())
+    }
+
+    @Test
+    fun customerTimelineKeepsSharedLedgerEventSemantics() = runBlocking {
+        repository.createCustomer("Maria Lina")
+        val customer = database.customerDao().all().single()
+        database.creditDao().insert(
+            CreditEntryEntity(
+                id = "purchase-ledger",
+                customerId = customer.id,
+                amountCents = 10_000,
+                type = CreditEntryType.SALE,
+                referenceId = null,
+                occurredAt = 1_000L,
+            ),
+        )
+        database.creditDao().insert(
+            CreditEntryEntity(
+                id = "adjustment-ledger",
+                customerId = customer.id,
+                amountCents = 2_500,
+                type = CreditEntryType.SALE,
+                ledgerType = SharedLedgerEventType.ADJUSTMENT.name,
+                reason = "Diferença conferida",
+                referenceId = null,
+                occurredAt = 2_000L,
+            ),
+        )
+
+        val tool = CustomerTimelineQueryTool(
+            entityResolver = resolver,
+            temporalCredit = TemporalCreditService(repository),
+            commerceRepository = repository,
+            clock = Clock.systemDefaultZone(),
+        )
+
+        val result = tool.execute("Maria Lina") as CustomerTimelineQueryResult.Ready
+
+        assertEquals(12_500L, result.result.currentBalanceCents)
+        assertEquals(2, result.result.items.size)
+        assertEquals("Ajuste", result.result.items.first().label)
+        assertEquals("+R$ 25,00", result.result.items.first().amountText)
+        assertEquals("Fiado", result.result.items.last().label)
     }
 
     private class RecordingAuditLogger : AuditLogger {

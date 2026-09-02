@@ -44,6 +44,17 @@ data class CustomerCreditTimeline(
     val currentBalanceCents: Long,
     val openCents: Long,
     val overdueCents: Long,
+    /** All immutable ledger events, kept separate from the temporal balance projection. */
+    val ledgerEvents: List<CustomerLedgerTimelineEvent> = emptyList(),
+)
+
+data class CustomerLedgerTimelineEvent(
+    val id: String,
+    val type: SharedLedgerEventType,
+    val occurredAt: Long,
+    val signedAmountCents: Long,
+    val paymentMethod: String?,
+    val reason: String?,
 )
 
 /**
@@ -93,14 +104,30 @@ class TemporalCreditService @Inject constructor(
         ): CustomerCreditTimeline {
             val customerEntries = entries.filter { it.customerId == customerId }
             val sales = customerEntries
-                .filter { it.type == CreditEntryType.SALE }
+                .filter {
+                    val event = SharedLedgerProjector.fromCreditEntry(it)
+                    event.type == SharedLedgerEventType.PURCHASE ||
+                        ((event.type == SharedLedgerEventType.ADJUSTMENT ||
+                            event.type == SharedLedgerEventType.REVERSAL) &&
+                            event.signedAmountCents > 0)
+                }
                 .sortedWith(compareBy<CreditEntryEntity> { it.occurredAt }.thenBy { it.id })
                 .map { MutableCredit(it, it.amountCents) }
-            val payments = customerEntries
-                .filter { it.type == CreditEntryType.PAYMENT }
+            val reductions = customerEntries
+                .filter {
+                    val event = SharedLedgerProjector.fromCreditEntry(it)
+                    event.type == SharedLedgerEventType.PAYMENT ||
+                        (event.type == SharedLedgerEventType.ADJUSTMENT &&
+                            event.signedAmountCents < 0) ||
+                        (event.type == SharedLedgerEventType.SETTLEMENT &&
+                            event.signedAmountCents < 0)
+                }
                 .sortedWith(compareBy<CreditEntryEntity> { it.occurredAt }.thenBy { it.id })
+            val payments = reductions.filter {
+                SharedLedgerProjector.fromCreditEntry(it).type == SharedLedgerEventType.PAYMENT
+            }
 
-            payments.forEach { payment ->
+            reductions.forEach { payment ->
                 var unapplied = (-payment.amountCents).coerceAtLeast(0)
                 sales.forEach { sale ->
                     if (unapplied > 0 && sale.outstandingCents > 0) {
@@ -156,6 +183,19 @@ class TemporalCreditService @Inject constructor(
                 overdueCents = timelineEntries
                     .filter { it.status == CreditTemporalStatus.OVERDUE }
                     .sumOf { it.outstandingCents },
+                ledgerEvents = customerEntries
+                    .map { entry ->
+                        val event = SharedLedgerProjector.fromCreditEntry(entry)
+                        CustomerLedgerTimelineEvent(
+                            id = event.id,
+                            type = event.type,
+                            occurredAt = event.occurredAtEpochMs,
+                            signedAmountCents = event.signedAmountCents,
+                            paymentMethod = event.paymentMethod,
+                            reason = event.reason,
+                        )
+                    }
+                    .sortedByDescending { it.occurredAt },
             )
         }
 

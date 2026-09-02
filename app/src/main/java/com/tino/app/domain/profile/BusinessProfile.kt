@@ -168,7 +168,7 @@ object TinoModuleRegistry {
     val customers = TinoVerticalModule(
         id = BusinessModule.CUSTOMERS,
         supportedVerticals = BusinessVertical.values().toSet(),
-        capabilities = setOf(TinoCapabilityId.LIST_CUSTOMERS, TinoCapabilityId.SEARCH_CUSTOMER),
+        capabilities = setOf(TinoCapabilityId.LIST_CUSTOMERS, TinoCapabilityId.GET_CUSTOMER_CONTACT, TinoCapabilityId.CREATE_CUSTOMER, TinoCapabilityId.SEARCH_CUSTOMER),
         vocabulary = setOf("cliente", "clientes"),
         analytics = emptySet(),
     )
@@ -188,7 +188,7 @@ object TinoModuleRegistry {
     val stockEntry = TinoVerticalModule(
         id = BusinessModule.STOCK_ENTRY,
         supportedVerticals = BusinessVertical.values().toSet(),
-        capabilities = setOf(TinoCapabilityId.REGISTER_STOCK_ENTRY),
+        capabilities = setOf(TinoCapabilityId.REGISTER_STOCK_ENTRY, TinoCapabilityId.LIST_SUPPLIERS),
         vocabulary = setOf("entrada", "mercadoria"),
         analytics = emptySet(),
     )
@@ -208,6 +208,10 @@ object TinoModuleRegistry {
             TinoCapabilityId.GET_PRODUCT_STOCK,
             TinoCapabilityId.GET_PRODUCT_PRICE,
             TinoCapabilityId.LIST_CUSTOMERS,
+            TinoCapabilityId.GET_CUSTOMER_CONTACT,
+            TinoCapabilityId.CREATE_CUSTOMER,
+            TinoCapabilityId.CHANGE_PRODUCT_PRICE,
+            TinoCapabilityId.LIST_SUPPLIERS,
             TinoCapabilityId.LIST_RECEIVABLES,
             TinoCapabilityId.RECEIVE_CREDIT_PAYMENT,
             TinoCapabilityId.REGISTER_STOCK_ENTRY,

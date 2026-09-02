@@ -416,11 +416,7 @@ class DefaultAgentRuntime @Inject constructor(
         }
     }
 
-    private fun plannerLabel(value: String): String = when {
-        value == "adk" -> "ADK"
-        value.endsWith("-fallback") -> "ADK_FALLBACK_DETERMINISTIC"
-        else -> "DETERMINISTIC"
-    }
+    private fun plannerLabel(value: String): String = "DETERMINISTIC"
 
     private fun telemetryState(decision: String): String = when (decision) {
         "REPLAN" -> AgentLoopState.REPLAN.name
@@ -470,28 +466,4 @@ class DefaultAgentRuntime @Inject constructor(
             AgentDecision.RequestConfirmation -> "REQUEST_CONFIRMATION"
             AgentDecision.Final -> "FINAL"
         }
-}
-
-/**
- * Production composition boundary for the autonomous loop. The ADK-aware
- * PlannerPort is replaceable; validation and execution stay in TINO-owned
- * ports and are never exposed to the model.
- */
-@Singleton
-class AdkAgentRuntime @Inject constructor(
-    planner: PlannerPort,
-    validator: IntelligencePlanValidator,
-    executor: IntelligencePlanExecutor,
-    telemetry: IntelligenceTelemetryPort,
-    decisionPolicy: AgentDecisionPolicy,
-) : AgentRuntimePort {
-    private val loop = DefaultAgentRuntime(
-        planner = planner,
-        validator = validator,
-        executor = executor,
-        telemetry = telemetry,
-        decisionPolicy = decisionPolicy,
-    )
-
-    override suspend fun run(interaction: AgentInteraction): AgentTurnResult = loop.run(interaction)
 }

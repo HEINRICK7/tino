@@ -1,10 +1,13 @@
 package com.tino.app.domain.intelligence
 
+import com.tino.app.domain.finance.FinancialPeriod
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 class RecommendationsTest {
     @Test
@@ -76,14 +79,75 @@ class RecommendationsTest {
         assertEquals(0, metrics.count(RecommendationOutcome.FALSE_POSITIVE))
     }
 
-    private class RecordingRecommendationRepository : RecommendationRepository {
+    @Test
+    fun predictiveGenerationDoesNotReturnOrPersistDuplicatePendingRecommendations() = runBlocking {
+        val existing = Recommendation(
+            id = "existing-stockout",
+            type = RecommendationType.STOCKOUT,
+            productId = "p1",
+            message = "Café está sem estoque.",
+            confidence = 0.99,
+        )
+        val repository = RecordingRecommendationRepository(pendingRecommendations = listOf(existing))
+        val facts = FakeFactsPort(
+            products = listOf(IntelligenceProduct("p1", "Café", 1200, 0)),
+            movements = mapOf(
+                "p1" to listOf(
+                    IntelligenceStockMovement(
+                        productId = "p1",
+                        quantityDelta = -3,
+                        reason = "sale",
+                        occurredAtEpochMs = 9_900L,
+                    ),
+                ),
+            ),
+        )
+        val result = PredictiveRecommendationService(
+            facts = facts,
+            analytics = DeterministicBusinessAnalytics(),
+            engine = LocalHeuristicRecommendationEngine(),
+            repository = repository,
+        ).generate(nowEpochMs = 10_000L)
+
+        assertTrue(result.recommendations.isEmpty())
+        assertTrue(repository.saved.isEmpty())
+    }
+
+    @Test
+    fun predictiveGenerationReturnsOnlyNewRecommendationsForTheUi() = runBlocking {
+        val repository = RecordingRecommendationRepository()
+        val facts = FakeFactsPort(
+            products = listOf(IntelligenceProduct("p1", "Café", 1200, 0)),
+            movements = mapOf(
+                "p1" to listOf(
+                    IntelligenceStockMovement("p1", -3, "sale", 9_900L),
+                ),
+            ),
+        )
+        val result = PredictiveRecommendationService(
+            facts = facts,
+            analytics = DeterministicBusinessAnalytics(),
+            engine = LocalHeuristicRecommendationEngine(),
+            repository = repository,
+        ).generate(nowEpochMs = 10_000L)
+
+        assertEquals(1, result.recommendations.size)
+        assertEquals(result.recommendations, repository.saved)
+    }
+
+    private class RecordingRecommendationRepository(
+        private val pendingRecommendations: List<Recommendation> = emptyList(),
+    ) : RecommendationRepository {
+        val saved = mutableListOf<Recommendation>()
         var updatedId: String? = null
         var updatedDecision: RecommendationDecision? = null
         var operationalMutations: Int = 0
 
-        override suspend fun saveAll(recommendations: List<Recommendation>) = Unit
-        override suspend fun pending(): List<Recommendation> = emptyList()
-        override fun observePending() = emptyFlow<List<Recommendation>>()
+        override suspend fun saveAll(recommendations: List<Recommendation>) {
+            saved += recommendations
+        }
+        override suspend fun pending(): List<Recommendation> = pendingRecommendations
+        override fun observePending(): Flow<List<Recommendation>> = flowOf(pendingRecommendations)
         override suspend fun updateDecision(id: String, decision: RecommendationDecision): Recommendation? {
             updatedId = id
             updatedDecision = decision
@@ -99,5 +163,19 @@ class RecommendationsTest {
         ) = Unit
 
         override fun observeOutcomeMetrics() = emptyFlow<RecommendationOutcomeMetrics>()
+    }
+
+    private class FakeFactsPort(
+        private val products: List<IntelligenceProduct>,
+        private val movements: Map<String, List<IntelligenceStockMovement>>,
+    ) : IntelligenceFactsPort {
+        override suspend fun financialSummary(period: FinancialPeriod) = error("not used")
+        override suspend fun customers() = emptyList<IntelligenceCustomer>()
+        override suspend fun receivables() = emptyList<IntelligenceReceivable>()
+        override suspend fun paymentEvents(customerId: String) = emptyList<IntelligencePaymentEvent>()
+        override suspend fun resolveCustomer(reference: String) = IntelligenceEntityResolution.NotFound
+        override suspend fun products() = products
+        override suspend fun resolveProduct(reference: String) = IntelligenceEntityResolution.NotFound
+        override suspend fun stockMovements(productId: String) = movements[productId].orEmpty()
     }
 }

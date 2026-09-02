@@ -17,6 +17,8 @@ data class ProductCatalogItem(
     val priceCents: Long,
     val stockQuantity: Int,
     val unit: String,
+    val stockQuantityExact: String = stockQuantity.toString(),
+    val stockTracked: Boolean = true,
 )
 
 data class ProductStockSnapshot(
@@ -36,6 +38,12 @@ data class ReceivableSummary(
 )
 
 data class CustomerCatalogItem(
+    val id: String,
+    val name: String,
+    val phone: String?,
+)
+
+data class SupplierCatalogItem(
     val id: String,
     val name: String,
     val phone: String?,
@@ -62,6 +70,42 @@ data class CreditPaymentResult(
     val operationId: String,
 )
 
+data class CreateCustomerCommand(
+    val name: String,
+    val phone: String?,
+)
+
+data class CustomerCreatedResult(
+    val customerId: String,
+    val name: String,
+    val phone: String?,
+)
+
+data class UpdateProductPriceCommand(
+    val productId: String,
+    val newPriceCents: Long,
+)
+
+data class ProductPriceUpdatedResult(
+    val productId: String,
+    val previousPriceCents: Long,
+    val newPriceCents: Long,
+)
+
+data class RegisterStockEntryCommand(
+    val productId: String,
+    val quantity: Int,
+    val unitCostCents: Long,
+    val supplierId: String? = null,
+)
+
+data class StockEntryRegisteredResult(
+    val productId: String,
+    val quantity: Int,
+    val unitCostCents: Long,
+    val supplierId: String?,
+)
+
 @Singleton
 class ObserveProductsUseCase @Inject constructor(
     private val commerceRepository: CommerceRepository,
@@ -74,6 +118,8 @@ class ObserveProductsUseCase @Inject constructor(
                 priceCents = product.priceCents,
                 stockQuantity = product.stockQuantity,
                 unit = product.unit,
+                stockQuantityExact = product.stockQuantityExact,
+                stockTracked = product.stockTracked,
             )
         }
     }
@@ -111,10 +157,16 @@ class GetProductPriceUseCase @Inject constructor(
 class ListReceivablesUseCase @Inject constructor(
     private val commerceRepository: CommerceRepository,
 ) {
-    suspend operator fun invoke(): List<ReceivableSummary> = commerceRepository.observeCustomerBalances()
-        .first()
-        .filter { it.balanceCents > 0L }
-        .map { balance -> ReceivableSummary(balance.id, balance.name, balance.balanceCents) }
+    suspend operator fun invoke(): List<ReceivableSummary> {
+        val names = commerceRepository.allCustomersForResolution().associateBy { it.id }
+        return commerceRepository.allSharedLedgerProjections()
+            .filter { it.balanceCents > 0L }
+            .mapNotNull { projection ->
+                names[projection.customerId]?.let { customer ->
+                    ReceivableSummary(customer.id, customer.name, projection.balanceCents)
+                }
+            }
+    }
 }
 
 @Singleton
@@ -125,6 +177,16 @@ class ListCustomersUseCase @Inject constructor(
         .observeCustomers()
         .first()
         .map { customer -> CustomerCatalogItem(customer.id, customer.name, customer.phone) }
+}
+
+@Singleton
+class ListSuppliersUseCase @Inject constructor(
+    private val commerceRepository: CommerceRepository,
+) {
+    suspend operator fun invoke(): List<SupplierCatalogItem> = commerceRepository
+        .observeSuppliers()
+        .first()
+        .map { supplier -> SupplierCatalogItem(supplier.id, supplier.name, supplier.phone) }
 }
 
 @Singleton
@@ -166,6 +228,54 @@ class RegisterCreditPaymentUseCase @Inject constructor(
             amountCents = command.amountCents,
             paymentMethod = command.paymentMethod,
             operationId = command.operationId,
+        )
+    }
+}
+
+@Singleton
+class CreateCustomerUseCase @Inject constructor(
+    private val commerceRepository: CommerceRepository,
+) {
+    suspend operator fun invoke(command: CreateCustomerCommand): CustomerCreatedResult {
+        val customerId = commerceRepository.createCustomer(command.name, command.phone)
+        val customer = commerceRepository.findCustomerById(customerId)
+            ?: error("Cliente recém-criado não encontrado.")
+        return CustomerCreatedResult(customer.id, customer.name, customer.phone)
+    }
+}
+
+@Singleton
+class UpdateProductPriceUseCase @Inject constructor(
+    private val commerceRepository: CommerceRepository,
+) {
+    suspend operator fun invoke(command: UpdateProductPriceCommand): ProductPriceUpdatedResult {
+        val product = commerceRepository.findProductById(command.productId)
+            ?: error("Produto não encontrado.")
+        commerceRepository.changeProductPrice(command.productId, command.newPriceCents)
+        return ProductPriceUpdatedResult(
+            productId = product.id,
+            previousPriceCents = product.priceCents,
+            newPriceCents = command.newPriceCents,
+        )
+    }
+}
+
+@Singleton
+class RegisterStockEntryUseCase @Inject constructor(
+    private val commerceRepository: CommerceRepository,
+) {
+    suspend operator fun invoke(command: RegisterStockEntryCommand): StockEntryRegisteredResult {
+        commerceRepository.registerStockReceipt(
+            productId = command.productId,
+            quantity = command.quantity,
+            unitCostCents = command.unitCostCents,
+            supplierId = command.supplierId,
+        )
+        return StockEntryRegisteredResult(
+            productId = command.productId,
+            quantity = command.quantity,
+            unitCostCents = command.unitCostCents,
+            supplierId = command.supplierId,
         )
     }
 }

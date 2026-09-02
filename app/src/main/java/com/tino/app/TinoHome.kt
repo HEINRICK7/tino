@@ -14,7 +14,13 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.animation.AnimatedVisibility
+import com.tino.app.ui.components.tinoClickable
+import com.tino.app.ui.components.tinoOccupiedBounds
+import com.tino.app.ui.components.tinoAnimateContentSize
+import com.tino.app.ui.components.tinoEnter
+import com.tino.app.ui.components.tinoExit
+import com.tino.app.ui.theme.LocalTinoReduceMotion
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -33,7 +39,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -41,9 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,9 +67,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tino.app.core.database.CustomerBalance
 import com.tino.app.core.database.ProductSummary
@@ -75,8 +76,6 @@ import com.tino.app.core.database.SupplierEntity
 import com.tino.fiscal.core.ProductImportResult
 import com.tino.app.R
 import com.tino.app.feature.home.TinoViewModel
-import com.tino.app.feature.voice.VoiceUiState
-import com.tino.app.feature.voice.VoiceViewModel
 import com.tino.app.feature.voice.ContextualVoiceState
 import com.tino.app.feature.voice.ContextualVoiceViewModel
 import com.tino.app.feature.voice.AgenticVoiceState
@@ -88,11 +87,15 @@ import com.tino.app.feature.fiscal.DocumentUploadScreen
 import com.tino.app.domain.voice.VoiceContext
 import com.tino.app.ui.a2ui.TinoA2UiRenderer
 import com.tino.app.ui.a2ui.TinoA2UiSurfaceHost
+import com.tino.app.ui.a2ui.TinoAgentCatalogSurface
+import com.tino.app.ui.a2ui.presentsBottomRiseCatalog
 import com.tino.app.interfaceadapter.a2ui.A2uiSemanticMapper
 import com.tino.app.domain.commerce.PaymentMethod
 import com.tino.app.domain.commerce.CustomerCreditTimeline
 import com.tino.app.ui.components.TinoBottomNavigation
 import com.tino.app.ui.components.TinoCard
+import com.tino.app.ui.components.TinoCardSurface
+import com.tino.app.ui.components.TinoCardStatus
 import com.tino.app.ui.components.TinoCustomerRow
 import com.tino.app.ui.components.TinoEmptyState
 import com.tino.app.ui.components.TinoIconButton
@@ -121,11 +124,22 @@ import com.tino.app.ui.components.TinoFilterChip
 import com.tino.app.ui.components.TinoSupplierRow
 import com.tino.app.ui.components.TinoSyncIndicator
 import com.tino.app.ui.components.TinoTextField
+import com.tino.app.ui.components.TinoTextAction
 import com.tino.app.ui.components.TinoTopBar
 import com.tino.app.ui.components.TinoVoiceCard
 import com.tino.app.ui.components.TinoVoiceFab
 import com.tino.app.ui.components.TinoVoiceFabState
 import com.tino.app.ui.components.TinoLogo
+import com.tino.app.ui.components.TinoMascot
+import com.tino.app.ui.components.TinoMascotPlacement
+import com.tino.app.ui.components.TinoMascotSize
+import com.tino.app.ui.components.TinoMascotState
+import com.tino.app.ui.components.TinoWelcomeHeader
+import com.tino.app.ui.components.TinoGettingStartedCard
+import com.tino.app.ui.components.TinoContextualEmptyState
+import com.tino.app.ui.components.TinoSectionLabel
+import com.tino.app.ui.components.TinoGettingStartedCarousel
+import com.tino.app.ui.components.TinoGettingStartedPage
 import com.tino.app.ui.icons.TinoIcons
 import com.tino.app.ui.theme.TinoGreen
 import com.tino.app.ui.theme.TinoGreenBright
@@ -139,13 +153,13 @@ import com.tino.app.ui.theme.TinoPaper
 import com.tino.app.ui.theme.TinoBlue
 import com.tino.app.ui.theme.TinoSize
 import com.tino.app.ui.theme.TinoSpacing
-import com.tino.app.ui.theme.TinoSurface
 import com.tino.app.ui.theme.TinoGreenTint
-import com.tino.app.ui.theme.TinoShapes
 import com.tino.app.ui.theme.TinoTheme
 import com.tino.app.core.ui.AppOrientationController
 import com.tino.app.presentation.splash.TinoSplashScreen
 import com.tino.app.domain.agent.ScreenAgentContext
+import com.tino.app.domain.agent.TinoPresenceState
+import com.tino.app.domain.agent.TinoPresenceMode
 import com.tino.app.domain.agent.TinoCapabilityRegistry
 import com.tino.app.domain.agent.TinoCapabilityId
 import com.tino.app.domain.profile.CapabilityRecoveryPolicy
@@ -164,6 +178,78 @@ import java.text.NumberFormat
 import java.util.Locale
 import kotlinx.coroutines.delay
 
+private enum class HomeNextAction(
+    val title: String,
+    val message: String,
+    val buttonLabel: String,
+    val icon: ImageVector,
+    val progressIndex: Int,
+    val destination: TinoScreen,
+) {
+    PRODUCT(
+        title = "Vamos começar?",
+        message = "Cadastre seus primeiros dados para o TINO trabalhar com você.",
+        buttonLabel = "Criar meu primeiro produto",
+        icon = TinoIcons.Products,
+        progressIndex = 0,
+        destination = TinoScreen.NewProduct,
+    ),
+    CUSTOMER(
+        title = "Cadastre seu primeiro cliente",
+        message = "Assim o TINO organiza a caderneta do seu comércio.",
+        buttonLabel = "Cadastrar primeiro cliente",
+        icon = TinoIcons.People,
+        progressIndex = 1,
+        destination = TinoScreen.Customers,
+    ),
+    SALE(
+        title = "Registre sua primeira venda",
+        message = "A partir daí, o TINO começa a acompanhar seu dia.",
+        buttonLabel = "Registrar primeira venda",
+        icon = TinoIcons.Cart,
+        progressIndex = 2,
+        destination = TinoScreen.QuickSale,
+    ),
+    SUPPLIER(
+        title = "Cadastre um fornecedor",
+        message = "Deixe as próximas entradas de mercadoria organizadas.",
+        buttonLabel = "Cadastrar fornecedor",
+        icon = TinoIcons.Supplier,
+        progressIndex = 2,
+        destination = TinoScreen.Suppliers,
+    ),
+}
+
+private sealed interface HomeExperienceState {
+    data object FirstRunEmpty : HomeExperienceState
+    data class GettingStarted(val nextAction: HomeNextAction) : HomeExperienceState
+    data object ActiveBusiness : HomeExperienceState
+}
+
+private fun deriveHomeExperienceState(
+    products: List<ProductSummary>,
+    customers: List<CustomerBalance>,
+    suppliers: List<SupplierEntity>,
+    todaySales: Int,
+    creditTotal: Long,
+): HomeExperienceState {
+    val hasNoCommerceData = products.isEmpty() &&
+        customers.isEmpty() &&
+        suppliers.isEmpty() &&
+        todaySales == 0 &&
+        creditTotal == 0L
+    if (hasNoCommerceData) return HomeExperienceState.FirstRunEmpty
+    val nextAction = when {
+        products.isEmpty() -> HomeNextAction.PRODUCT
+        customers.isEmpty() -> HomeNextAction.CUSTOMER
+        todaySales == 0 -> HomeNextAction.SALE
+        suppliers.isEmpty() -> HomeNextAction.SUPPLIER
+        else -> null
+    }
+    return nextAction?.let { HomeExperienceState.GettingStarted(it) }
+        ?: HomeExperienceState.ActiveBusiness
+}
+
 @Composable
 internal fun HomeScreen(
     todayTotal: Long,
@@ -176,6 +262,7 @@ internal fun HomeScreen(
     creditCustomers: Int,
     customers: List<CustomerBalance> = emptyList(),
     products: List<ProductSummary> = emptyList(),
+    suppliers: List<SupplierEntity> = emptyList(),
     onNavigate: (TinoScreen) -> Unit,
     storeProfile: StoreProfileEntity? = null,
     agenticVoiceState: AgenticVoiceState = AgenticVoiceState.Idle,
@@ -193,82 +280,94 @@ internal fun HomeScreen(
     onAgenticTranscriptSubmit: () -> Unit = {},
     onAgenticCapabilityUseOnce: () -> Unit = {},
     onAgenticCapabilityActivate: (TinoCapabilityId) -> Unit = {},
+    onAgenticCardAction: (String) -> Unit = {},
     onQuickQueryOpen: () -> Unit = {},
     businessProfile: BusinessProfile? = null,
     recommendations: List<Recommendation> = emptyList(),
     onRecommendationDecision: (Recommendation, Boolean) -> Unit = { _, _ -> },
+    agentPresence: TinoPresenceState = TinoPresenceState(),
 ) {
-    var queryText by remember { mutableStateOf("") }
-    var keyboardInputVisible by remember { mutableStateOf(false) }
-    val agenticSurfaceVisible = agenticVoiceState !is AgenticVoiceState.Idle &&
-        agenticVoiceState !is AgenticVoiceState.Cancelled
+    val catalogOpen = agenticVoiceState.presentsBottomRiseCatalog()
     val homeConfiguration = HomeConfiguration.from(
         businessProfile ?: BusinessProfile(
             primaryVertical = BusinessVertical.RETAIL,
             enabledModules = VerticalPresetCatalog.forVertical(BusinessVertical.RETAIL).defaultModules,
         ),
     )
+    val experienceState = deriveHomeExperienceState(products, customers, suppliers, todaySales, creditTotal)
+    val firstRunCarouselPages = remember {
+        listOf(
+            TinoGettingStartedPage(
+                title = "Ainda não tem produtos cadastrados",
+                message = "Posso te ajudar a cadastrar seu primeiro produto.",
+                icon = TinoIcons.Products,
+                actionLabel = "Cadastrar agora →",
+                showMascot = true,
+            ),
+            TinoGettingStartedPage(
+                title = "Pode falar comigo",
+                message = "Toque no mascote para pedir ajuda ou consultar alguma coisa.",
+                icon = TinoIcons.Voice,
+                showMascot = true,
+            ),
+            TinoGettingStartedPage(
+                title = "Comece aos poucos",
+                message = "Depois do produto, você pode adicionar clientes e fornecedores.",
+                icon = TinoIcons.People,
+                showMascot = true,
+            ),
+        )
+    }
+    Box(Modifier.fillMaxSize()) {
     Column(
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = TinoSpacing.screen, vertical = TinoSpacing.md)
             .padding(bottom = TinoSpacing.xl),
-        verticalArrangement = Arrangement.spacedBy(TinoSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(
+            if (experienceState is HomeExperienceState.FirstRunEmpty) TinoSpacing.sm else TinoSpacing.md,
+        ),
     ) {
         Row(
-            Modifier.fillMaxWidth(),
+            Modifier.fillMaxWidth().tinoOccupiedBounds("home-header"),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TinoLogo()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(TinoSpacing.xs)) {
-                    Box(Modifier.size(7.dp).background(TinoGreenBright, CircleShape))
+                    Box(Modifier.size(TinoSize.homeOnlineDot).background(TinoGreenBright, CircleShape))
                     Text("Online", color = TinoGreen, style = MaterialTheme.typography.labelMedium)
                 }
                 TinoIconButton(TinoIcons.Store, "Comércio ativo", true) { onNavigate(TinoScreen.Settings) }
             }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(TinoSpacing.xs)) {
-            Text("Bom dia!", style = MaterialTheme.typography.headlineSmall)
-            Text("O que vamos fazer hoje?", color = TinoMuted, style = MaterialTheme.typography.bodyMedium)
-        }
-        if (agenticSurfaceVisible) {
-            HomeVoiceSurface(
-                state = agenticVoiceState,
-                onStart = onAgenticVoiceStart,
-                onStop = onAgenticVoiceStop,
-                onCancel = onAgenticVoiceCancel,
-                onActionConfirm = onAgenticActionConfirm,
-                onUndo = onAgenticUndo,
-                onEntityChoiceSelected = onAgenticEntityChoiceSelected,
-                onTranscriptEdit = onAgenticTranscriptEdit,
-                onTranscriptChange = onAgenticTranscriptChange,
-                onTranscriptEditCancel = onAgenticTranscriptEditCancel,
-                onTranscriptContinue = onAgenticTranscriptContinue,
-                onTranscriptSubmit = onAgenticTranscriptSubmit,
-                onCapabilityUseOnce = onAgenticCapabilityUseOnce,
-                onCapabilityActivate = onAgenticCapabilityActivate,
+        TinoWelcomeHeader(
+            greeting = "Bom dia! 👋",
+            message = "Sou o TINO e estou aqui para facilitar o dia a dia do seu comércio.",
+        )
+        when (val state = experienceState) {
+            HomeExperienceState.FirstRunEmpty -> TinoGettingStartedCard(
+                title = "Vamos começar?",
+                message = "Cadastre seus primeiros dados para o TINO trabalhar com você.",
+                actionLabel = "Criar meu primeiro produto",
+                icon = TinoIcons.Products,
+                progressIndex = 0,
+                showProgress = false,
+                compact = true,
+                onAction = { onNavigate(HomeNextAction.PRODUCT.destination) },
             )
-        } else {
-            TinoVoiceInputBar(
-                text = queryText,
-                textInputVisible = keyboardInputVisible,
-                onTextChange = { queryText = it },
-                onSubmitText = {
-                    val text = queryText.trim()
-                    if (text.isNotBlank()) {
-                        onAgenticSubmitText(text)
-                        queryText = ""
-                        keyboardInputVisible = false
-                    }
-                },
-                onStartVoice = onAgenticVoiceStart,
-                onKeyboard = { keyboardInputVisible = !keyboardInputVisible },
-                onQuickQueries = onQuickQueryOpen,
+            is HomeExperienceState.GettingStarted -> TinoContextualEmptyState(
+                title = state.nextAction.title,
+                message = state.nextAction.message,
+                actionLabel = state.nextAction.buttonLabel,
+                icon = state.nextAction.icon,
+                onAction = { onNavigate(state.nextAction.destination) },
             )
+            HomeExperienceState.ActiveBusiness -> Unit
         }
+        TinoSectionLabel("Ações rápidas")
         homeConfiguration.primaryActions.toList().sortedBy { it.ordinal }.chunked(3).forEach { rowActions ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
                 rowActions.forEach { action ->
@@ -277,11 +376,26 @@ internal fun HomeScreen(
                 repeat(3 - rowActions.size) { Spacer(Modifier.weight(1f)) }
             }
         }
-        HomeRecommendations(
-            recommendations = recommendations,
-            onDecision = onRecommendationDecision,
-            onOpenStock = { onNavigate(TinoScreen.Products) },
-        )
+        if (experienceState is HomeExperienceState.FirstRunEmpty) {
+            TinoGettingStartedCarousel(
+                pages = firstRunCarouselPages,
+                eyebrow = "TINO SUGERE",
+                compact = true,
+                onAction = { page ->
+                    when (page.title) {
+                        "Ainda não tem produtos cadastrados" -> onNavigate(TinoScreen.NewProduct)
+                        "Comece aos poucos" -> onNavigate(TinoScreen.Customers)
+                    }
+                },
+            )
+        }
+        if (experienceState is HomeExperienceState.ActiveBusiness) {
+            HomeRecommendations(
+                recommendations = recommendations,
+                onDecision = onRecommendationDecision,
+                onOpenStock = { onNavigate(TinoScreen.Products) },
+            )
+        }
         if ((homeConfiguration.has(HomeActionId.SALES) && (todayTotal > 0L || todayReceived > 0L)) ||
             (homeConfiguration.has(HomeActionId.CREDIT) && creditTotal > 0L)
         ) {
@@ -295,6 +409,20 @@ internal fun HomeScreen(
                 onClick = { onNavigate(TinoScreen.DailySummary) },
             )
         }
+    }
+    if (catalogOpen) {
+        TinoAgentCatalogSurface(
+            state = agenticVoiceState,
+            onDismiss = onAgenticVoiceCancel,
+            onStart = onAgenticVoiceStart,
+            onActionConfirm = onAgenticActionConfirm,
+            onUndo = onAgenticUndo,
+            onEntityChoiceSelected = onAgenticEntityChoiceSelected,
+            onCapabilityUseOnce = onAgenticCapabilityUseOnce,
+            onCapabilityActivate = onAgenticCapabilityActivate,
+            onCardAction = onAgenticCardAction,
+        )
+    }
     }
 }
 
@@ -315,17 +443,13 @@ private fun HomeRecommendations(
             onAction = onOpenStock,
         )
         visible.forEach { recommendation ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = TinoShapes.small,
-                colors = CardDefaults.cardColors(
-                    containerColor = if (recommendation.type == RecommendationType.STOCKOUT) {
-                        com.tino.app.ui.theme.TinoAmberContainer
-                    } else {
-                        TinoSurface
-                    },
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+            TinoCardSurface(
+                status = if (recommendation.type == RecommendationType.STOCKOUT) {
+                    TinoCardStatus.WARNING
+                } else {
+                    TinoCardStatus.NEUTRAL
+                },
+                description = "Sugestão do TINO: ${recommendation.message}",
             ) {
                 Column(
                     Modifier.fillMaxWidth().padding(TinoSpacing.md),
@@ -352,12 +476,8 @@ private fun HomeRecommendations(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
                     ) {
-                        TextButton(onClick = { onDecision(recommendation, false) }) {
-                            Text("IGNORAR", color = TinoMuted)
-                        }
-                        TextButton(onClick = { onDecision(recommendation, true) }) {
-                            Text("ACEITAR", color = TinoGreen)
-                        }
+                        TinoTextAction("IGNORAR", { onDecision(recommendation, false) }, color = TinoMuted)
+                        TinoTextAction("ACEITAR", { onDecision(recommendation, true) }, color = TinoGreen)
                     }
                 }
             }
@@ -379,6 +499,7 @@ private fun HomeActionTile(action: HomeActionId, modifier: Modifier, onNavigate:
 
 @Composable
 internal fun TinoVoiceInputBar(
+    mode: TinoPresenceMode = TinoPresenceMode.IDLE,
     text: String,
     textInputVisible: Boolean,
     onTextChange: (String) -> Unit,
@@ -388,20 +509,21 @@ internal fun TinoVoiceInputBar(
     onQuickQueries: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(TinoSpacing.xs)) {
-        Card(
-            modifier = Modifier.fillMaxWidth().clickable(onClick = onStartVoice),
-            shape = TinoShapes.medium,
-            colors = CardDefaults.cardColors(containerColor = TinoGreenLight),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        TinoCardSurface(
+            modifier = Modifier.tinoClickable(onClick = onStartVoice),
+            status = TinoCardStatus.SUCCESS,
+            description = "Falar com o TINO",
         ) {
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = TinoSpacing.md),
+                Modifier.fillMaxWidth().heightIn(min = TinoSize.homeVoiceInputHeight).padding(horizontal = TinoSpacing.md),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(TinoSpacing.sm),
             ) {
-                Box(Modifier.size(34.dp).background(TinoGreenTint, CircleShape), contentAlignment = Alignment.Center) {
-                    Icon(TinoIcons.Voice, contentDescription = "Falar com o TINO", tint = TinoGreen, modifier = Modifier.size(TinoSize.iconNormal))
-                }
+                TinoMascot(
+                    state = TinoMascotState.fromPresence(mode),
+                    size = TinoMascotSize.Small,
+                    placement = TinoMascotPlacement.Inline,
+                )
                 Text(
                     if (textInputVisible) "Digite sua pergunta" else "Fale algo ou toque para falar",
                     modifier = Modifier.weight(1f),
@@ -414,7 +536,11 @@ internal fun TinoVoiceInputBar(
                 TinoIconButton(TinoIcons.Grid, "Consultas rápidas", onQuickQueries)
             }
         }
-        if (textInputVisible) {
+        AnimatedVisibility(
+            visible = textInputVisible,
+            enter = tinoEnter(LocalTinoReduceMotion.current),
+            exit = tinoExit(LocalTinoReduceMotion.current),
+        ) {
             com.tino.app.ui.components.TinoAgentInput(
                 value = text,
                 onValueChange = onTextChange,
@@ -434,11 +560,10 @@ internal fun HomeTodaySummaryCard(
     showCredit: Boolean = true,
     onClick: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = TinoShapes.large,
-        colors = CardDefaults.cardColors(containerColor = TinoSurface),
-        elevation = CardDefaults.cardElevation(defaultElevation = TinoSize.cardElevation),
+    TinoCardSurface(
+        modifier = Modifier.tinoOccupiedBounds("home-today-summary"),
+        onClick = onClick,
+        description = "Resumo de hoje",
     ) {
         Column(Modifier.fillMaxWidth().padding(TinoSpacing.md), verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -466,7 +591,7 @@ internal fun HomeTodaySummaryCard(
 
 @Composable
 private fun HomeSummaryMetric(label: String, value: String, modifier: Modifier, accent: Color = TinoInk) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(TinoSpacing.xxs)) {
         Text(label, color = TinoMuted, style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
         Text(value, color = accent, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
     }
@@ -482,14 +607,13 @@ internal fun HomePaymentCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    Card(
-        modifier = modifier.clickable(onClick = onClick),
-        shape = TinoShapes.small,
-        colors = CardDefaults.cardColors(containerColor = TinoSurface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    TinoCardSurface(
+        modifier = modifier,
+        onClick = onClick,
+        description = "$label: ${formatCents(amountCents)}",
     ) {
         Column(Modifier.fillMaxWidth().padding(vertical = TinoSpacing.md, horizontal = TinoSpacing.xs), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(TinoSpacing.xs)) {
-            Box(Modifier.size(34.dp).background(container, CircleShape), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(TinoSize.homePaymentIcon).background(container, CircleShape), contentAlignment = Alignment.Center) {
                 Icon(icon, contentDescription = label, tint = accent, modifier = Modifier.size(TinoSize.iconNormal))
             }
             Text(label, color = TinoInk, style = MaterialTheme.typography.labelSmall, maxLines = 1)
@@ -501,7 +625,7 @@ internal fun HomePaymentCard(
 @Composable
 internal fun HomePaymentRow(icon: ImageVector, label: String, amountCents: Long, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = TinoSize.minTouch).clickable(onClick = onClick),
+        Modifier.fillMaxWidth().heightIn(min = TinoSize.minTouch).tinoClickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(TinoSpacing.md),
     ) {
@@ -515,7 +639,7 @@ internal fun HomePaymentRow(icon: ImageVector, label: String, amountCents: Long,
 @Composable
 internal fun HomeDebtorRow(customer: CustomerBalance, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = TinoSize.minTouch).clickable(onClick = onClick),
+        Modifier.fillMaxWidth().heightIn(min = TinoSize.minTouch).tinoClickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(customer.name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
@@ -540,6 +664,7 @@ internal fun HomeVoiceSurface(
     onTranscriptSubmit: () -> Unit,
     onCapabilityUseOnce: () -> Unit = {},
     onCapabilityActivate: (TinoCapabilityId) -> Unit = {},
+    onCardAction: (String) -> Unit = {},
 ) {
     when (state) {
         AgenticVoiceState.Idle, AgenticVoiceState.Cancelled -> TinoVoiceCard(
@@ -585,21 +710,19 @@ internal fun HomeVoiceSurface(
             }
             TinoSecondaryButton("CANCELAR FALA", onCancel)
         }
-        is AgenticVoiceState.Understanding -> Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = TinoShapes.medium,
-            color = TinoGreenLight,
-            tonalElevation = 0.dp,
+        is AgenticVoiceState.Understanding -> TinoCardSurface(
+            status = TinoCardStatus.INFO,
+            description = "Processando fala: ${state.contextLabel}",
         ) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = TinoSpacing.md, vertical = TinoSpacing.sm),
+                Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(TinoSpacing.sm),
             ) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(TinoSize.iconNormal),
                     color = TinoGreen,
-                    strokeWidth = 2.dp,
+                    strokeWidth = TinoSize.progressStrokeWidth,
                 )
                 Text(
                     text = state.contextLabel,
@@ -621,7 +744,7 @@ internal fun HomeVoiceSurface(
         is AgenticVoiceState.Navigation -> Unit
         is AgenticVoiceState.Result -> {
             Column(verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
-                TinoA2UiRenderer(state.response.message)
+                TinoA2UiRenderer(state.response.message, onCardAction = onCardAction)
                 TinoCard {
                     Text("Resposta pronta", style = MaterialTheme.typography.titleMedium)
                     if (BuildConfig.DEBUG) {
@@ -643,7 +766,7 @@ internal fun HomeVoiceSurface(
         }
         is AgenticVoiceState.CustomerBalanceResult -> {
             Column(verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
-                TinoA2UiRenderer(state.response.message)
+                TinoA2UiRenderer(state.response.message, onCardAction = onCardAction)
                 TinoCard {
                     Text("Resposta pronta", style = MaterialTheme.typography.titleMedium)
                     if (BuildConfig.DEBUG) {
@@ -651,7 +774,7 @@ internal fun HomeVoiceSurface(
                             "Fast Router ${if (state.metrics.fastRouterHit) "HIT" else "MISS"} " +
                                 "${state.metrics.fastRouterMs}ms · " +
                                 "VOICE_FINAL ${state.metrics.voiceFinalMs ?: 0}ms · " +
-                                "Gemma ${state.metrics.gemmaMs}ms · " +
+                                "interpretação ${state.metrics.intentMs}ms · " +
                                 "cliente ${state.metrics.customerResolutionMs ?: 0}ms · " +
                                 "tool ${state.metrics.capabilityMs}ms · A2UI ${state.metrics.a2uiMs}ms · " +
                                 "card ${state.metrics.totalToCardMs}ms · pós-final ${state.metrics.postFinalToCardMs}ms",
@@ -666,7 +789,7 @@ internal fun HomeVoiceSurface(
         }
         is AgenticVoiceState.CustomerTimelineResult -> {
             Column(verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
-                TinoA2UiRenderer(state.response.message)
+                TinoA2UiRenderer(state.response.message, onCardAction = onCardAction)
                 TinoCard {
                     Text("Histórico pronto", style = MaterialTheme.typography.titleMedium)
                     if (BuildConfig.DEBUG) {
@@ -674,7 +797,7 @@ internal fun HomeVoiceSurface(
                             "Fast Router ${if (state.metrics.fastRouterHit) "HIT" else "MISS"} " +
                                 "${state.metrics.fastRouterMs}ms · " +
                                 "VOICE_FINAL ${state.metrics.voiceFinalMs ?: 0}ms · " +
-                                "Gemma ${state.metrics.gemmaMs}ms · " +
+                                "interpretação ${state.metrics.intentMs}ms · " +
                                 "cliente ${state.metrics.customerResolutionMs ?: 0}ms · " +
                                 "tool ${state.metrics.capabilityMs}ms · A2UI ${state.metrics.a2uiMs}ms · " +
                                 "card ${state.metrics.totalToCardMs}ms · pós-final ${state.metrics.postFinalToCardMs}ms",
@@ -688,7 +811,7 @@ internal fun HomeVoiceSurface(
             }
         }
         is AgenticVoiceState.ReadListResult -> {
-            TinoA2UiRenderer(state.response.message)
+            TinoA2UiRenderer(state.response.message, onCardAction = onCardAction)
         }
         is AgenticVoiceState.IntelligenceResult -> {
             Column(verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
@@ -731,7 +854,7 @@ internal fun HomeVoiceSurface(
                     TinoCard {
                         Text(
                             "VOICE_FINAL ${state.metrics.voiceFinalMs ?: 0}ms · " +
-                                "Gemma ${state.metrics.gemmaMs}ms · " +
+                                "interpretação ${state.metrics.intentMs}ms · " +
                                 "cliente ${state.metrics.customerResolutionMs ?: 0}ms · " +
                                 "produto ${state.metrics.productResolutionMs ?: 0}ms · " +
                                 "capability ${state.metrics.capabilityMs}ms",
@@ -813,7 +936,7 @@ private fun TranscriptReviewActions(
     onSubmit: () -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        if (maxWidth < 380.dp) {
+        if (maxWidth < TinoSize.compactWidthBreakpoint) {
             Column(verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
                 Row(
                     Modifier.fillMaxWidth(),

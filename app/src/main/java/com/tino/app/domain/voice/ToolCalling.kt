@@ -9,6 +9,12 @@ import com.tino.app.domain.commerce.PaymentMethod
 import com.tino.app.core.common.UuidV7
 import com.tino.app.domain.usecase.RegisterCreditPaymentCommand
 import com.tino.app.domain.usecase.RegisterCreditPaymentUseCase
+import com.tino.app.domain.usecase.CreateCustomerCommand
+import com.tino.app.domain.usecase.CreateCustomerUseCase
+import com.tino.app.domain.usecase.UpdateProductPriceCommand
+import com.tino.app.domain.usecase.UpdateProductPriceUseCase
+import com.tino.app.domain.usecase.RegisterStockEntryCommand
+import com.tino.app.domain.usecase.RegisterStockEntryUseCase
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -27,6 +33,7 @@ enum class CommerceToolName {
     GET_TODAY_SALES,
     PREPARE_PURCHASE,
     FIND_SUPPLIER,
+    CREATE_CUSTOMER,
 }
 
 val CommerceToolName.isReadOnly: Boolean
@@ -46,6 +53,7 @@ val CommerceToolName.isReadOnly: Boolean
         CommerceToolName.CORRECT_CREDIT_PAYMENT,
         CommerceToolName.PREPARE_PURCHASE,
         CommerceToolName.CHANGE_PRODUCT_PRICE,
+        CommerceToolName.CREATE_CUSTOMER,
         -> false
     }
 
@@ -135,10 +143,6 @@ class ToolClarificationException(
     val options: List<String> = emptyList(),
 ) : IllegalArgumentException(message)
 
-interface GemmaOrchestrator {
-    suspend fun interpret(committedTranscript: String): ToolCall?
-}
-
 interface ToolExecutor {
     suspend fun preview(call: ToolCall): ToolPreview
     suspend fun execute(call: ToolCall, confirmed: Boolean): ToolExecutionResult
@@ -194,26 +198,22 @@ class MutationSafeToolExecutor(
     }
 }
 
-/** Deterministic global fallback used when the on-device Gemma runtime is unavailable. */
-@Singleton
-class PilotGemmaOrchestrator @Inject constructor() : GemmaOrchestrator {
-    private val globalCommandRouter = GlobalCommandRouter()
-
-    override suspend fun interpret(committedTranscript: String): ToolCall? {
-        return globalCommandRouter.route(committedTranscript)
-    }
-}
-
 @Singleton
 class CommerceToolDispatcher @Inject constructor(
     private val commerceRepository: CommerceRepository,
     private val entityResolver: EntityResolutionService,
     private val registerCreditPayment: RegisterCreditPaymentUseCase,
+    private val createCustomer: CreateCustomerUseCase,
+    private val updateProductPrice: UpdateProductPriceUseCase,
+    private val registerStockEntry: RegisterStockEntryUseCase,
 ) : ToolExecutor {
     constructor(commerceRepository: CommerceRepository) : this(
         commerceRepository,
         EntityResolutionService(commerceRepository, NoopAuditLogger),
         RegisterCreditPaymentUseCase(commerceRepository),
+        CreateCustomerUseCase(commerceRepository),
+        UpdateProductPriceUseCase(commerceRepository),
+        RegisterStockEntryUseCase(commerceRepository),
     )
     constructor(
         commerceRepository: CommerceRepository,
@@ -222,6 +222,9 @@ class CommerceToolDispatcher @Inject constructor(
         commerceRepository,
         entityResolver,
         RegisterCreditPaymentUseCase(commerceRepository),
+        CreateCustomerUseCase(commerceRepository),
+        UpdateProductPriceUseCase(commerceRepository),
+        RegisterStockEntryUseCase(commerceRepository),
     )
     override suspend fun preview(call: ToolCall): ToolPreview = when (call.name) {
         CommerceToolName.SEARCH_PRODUCT -> {
@@ -318,6 +321,18 @@ class CommerceToolDispatcher @Inject constructor(
                     currentBalanceText = formatCents(currentBalance),
                     projectedBalanceText = formatCents(currentBalance - amountCents),
                 ),
+            )
+        }
+        CommerceToolName.CREATE_CUSTOMER -> {
+            val name = call.required("name")
+            val phone = call.arguments["phone"]?.takeIf { it.isNotBlank() }
+            ToolPreview(
+                title = "Cadastrar cliente?",
+                detail = listOf(
+                    name,
+                    phone?.let { "Telefone: $it" },
+                ).filterNotNull().joinToString("\n"),
+                confirmLabel = "CADASTRAR CLIENTE",
             )
         }
         CommerceToolName.CORRECT_CREDIT_PAYMENT -> {
@@ -450,11 +465,13 @@ class CommerceToolDispatcher @Inject constructor(
                 val product = productFor(call.required("product"))
                 val supplier = call.arguments["supplier"]?.takeIf { it.isNotBlank() }
                     ?.let { supplierFor(it) }
-                commerceRepository.registerStockReceipt(
-                    productId = product.id,
-                    quantity = call.required("quantity").toInt(),
-                    unitCostCents = call.required("unit_cost_cents").toLong(),
-                    supplierId = supplier?.id,
+                registerStockEntry(
+                    RegisterStockEntryCommand(
+                        productId = product.id,
+                        quantity = call.required("quantity").toInt(),
+                        unitCostCents = call.required("unit_cost_cents").toLong(),
+                        supplierId = supplier?.id,
+                    ),
                 )
                 ToolExecutionResult(
                     message = "Entrada de mercadoria registrada.",
@@ -463,9 +480,11 @@ class CommerceToolDispatcher @Inject constructor(
             }
             CommerceToolName.CHANGE_PRODUCT_PRICE -> {
                 val product = productFor(call.required("product"))
-                commerceRepository.changeProductPrice(
-                    productId = product.id,
-                    newPriceCents = call.required("new_price_cents").toLong(),
+                updateProductPrice(
+                    UpdateProductPriceCommand(
+                        productId = product.id,
+                        newPriceCents = call.required("new_price_cents").toLong(),
+                    ),
                 )
                 ToolExecutionResult(
                     message = "Preço de ${product.name} alterado.",
@@ -503,6 +522,18 @@ class CommerceToolDispatcher @Inject constructor(
                         amountCents = call.required("amount_cents").toLong(),
                         methodStorageValue = paymentMethod.storageValue,
                     ),
+                )
+            }
+            CommerceToolName.CREATE_CUSTOMER -> {
+                val created = createCustomer(
+                    CreateCustomerCommand(
+                        name = call.required("name"),
+                        phone = call.arguments["phone"]?.takeIf { it.isNotBlank() },
+                    ),
+                )
+                ToolExecutionResult(
+                    message = "Cliente ${created.name} cadastrado.",
+                    title = "Cliente cadastrado",
                 )
             }
             CommerceToolName.CORRECT_CREDIT_PAYMENT -> {

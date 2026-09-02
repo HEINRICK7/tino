@@ -26,12 +26,17 @@ enum class AgentCapability {
     GET_PRODUCT_STOCK,
     GET_PRODUCT_PRICE,
     LIST_CUSTOMERS,
+    LIST_SUPPLIERS,
     LIST_RECEIVABLES,
     LIST_OVERDUE,
     ADD_CREDIT_ITEM,
     REGISTER_CREDIT_PAYMENT,
     GET_CUSTOMER_BALANCE,
     GET_CUSTOMER_TIMELINE,
+    GET_CUSTOMER_CONTACT,
+    CREATE_CUSTOMER,
+    UPDATE_PRODUCT_PRICE,
+    REGISTER_STOCK_ENTRY,
 }
 
 data class AgentRequest(val text: String)
@@ -256,6 +261,7 @@ sealed interface CustomerBalanceQueryResult {
 class CustomerTimelineQueryTool @Inject constructor(
     private val entityResolver: com.tino.app.domain.commerce.EntityResolutionService,
     private val temporalCredit: com.tino.app.domain.commerce.TemporalCreditService,
+    private val commerceRepository: com.tino.app.domain.commerce.CommerceRepository,
     private val clock: Clock,
 ) : CustomerTimelineQueryPort {
     override suspend fun execute(reference: String): CustomerTimelineQueryResult {
@@ -267,29 +273,18 @@ class CustomerTimelineQueryTool @Inject constructor(
                     now = clock.millis(),
                     zone = clock.zone,
                 )
-                val items = buildList {
-                    timeline.entries.forEach { entry ->
-                        add(
-                            CustomerTimelineItem(
-                                occurredAt = entry.occurredAt,
-                                dateText = formatDate(entry.occurredAt, clock.zone),
-                                label = "Fiado",
-                                amountText = "+${formatCents(entry.amountCents)}",
-                                amountCents = entry.amountCents,
-                            ),
-                        )
-                    }
-                    timeline.payments.forEach { payment ->
-                        add(
-                            CustomerTimelineItem(
-                                occurredAt = payment.occurredAt,
-                                dateText = formatDate(payment.occurredAt, clock.zone),
-                                label = "Pagou ${paymentMethodLabel(payment.paymentMethod)}",
-                                amountText = "-${formatCents(payment.amountCents)}",
-                                amountCents = -payment.amountCents,
-                            ),
-                        )
-                    }
+                // The temporal projection remains the source for balance/status. The
+                // customer-facing history is now read from the semantic Shared Ledger,
+                // so adjustments, disputes and settlements cannot be mislabeled as sales.
+                val statement = commerceRepository.sharedLedgerStatement(match.value.id)
+                val items = statement.entries.map { entry ->
+                    CustomerTimelineItem(
+                        occurredAt = entry.occurredAtEpochMs,
+                        dateText = formatDate(entry.occurredAtEpochMs, clock.zone),
+                        label = ledgerLabel(entry.type, entry.paymentMethod),
+                        amountText = signedAmountText(entry.signedAmountCents),
+                        amountCents = entry.signedAmountCents,
+                    )
                 }.sortedByDescending { it.occurredAt }
                 CustomerTimelineQueryResult.Ready(
                     result = CustomerTimelineResult(
@@ -324,6 +319,24 @@ class CustomerTimelineQueryTool @Inject constructor(
         "card" -> "na maquininha"
         "cash" -> "em dinheiro"
         else -> "(forma não identificada)"
+    }
+
+    private fun ledgerLabel(
+        type: com.tino.app.domain.commerce.SharedLedgerEventType,
+        paymentMethod: String?,
+    ): String = when (type) {
+        com.tino.app.domain.commerce.SharedLedgerEventType.PURCHASE -> "Fiado"
+        com.tino.app.domain.commerce.SharedLedgerEventType.PAYMENT ->
+            "Pagou ${paymentMethodLabel(paymentMethod.orEmpty())}"
+        com.tino.app.domain.commerce.SharedLedgerEventType.ADJUSTMENT -> "Ajuste"
+        com.tino.app.domain.commerce.SharedLedgerEventType.REVERSAL -> "Reversão"
+        com.tino.app.domain.commerce.SharedLedgerEventType.DISPUTE -> "Contestação"
+        com.tino.app.domain.commerce.SharedLedgerEventType.SETTLEMENT -> "Quitação"
+    }
+
+    private fun signedAmountText(cents: Long): String = when {
+        cents >= 0L -> "+${formatCents(cents)}"
+        else -> "-${formatCents(-cents)}"
     }
 
     private fun formatCents(cents: Long): String =
@@ -545,8 +558,16 @@ class TinoAgentBoundary @Inject constructor(
                     dataSource = AgentDataSource.LOCAL_ONLY,
                 )
             }
-            AgentCapability.LIST_PRODUCTS -> readList(intent) { dbFirstRead.listProducts() }
-            AgentCapability.REPLENISHMENT_QUERY -> readList(intent) { dbFirstRead.listReplenishment() }
+            AgentCapability.LIST_PRODUCTS -> readList(intent) {
+                intent.productRef?.let { reference ->
+                    dbFirstRead.productFact(AgentCapability.LIST_PRODUCTS, reference)
+                } ?: dbFirstRead.listProducts()
+            }
+            AgentCapability.REPLENISHMENT_QUERY -> readList(intent) {
+                intent.productRef?.let { reference ->
+                    dbFirstRead.productFact(AgentCapability.GET_PRODUCT_STOCK, reference)
+                } ?: dbFirstRead.listReplenishment()
+            }
             AgentCapability.GET_PRODUCT_STOCK,
             AgentCapability.GET_PRODUCT_PRICE,
             -> readList(intent) {
@@ -555,12 +576,25 @@ class TinoAgentBoundary @Inject constructor(
                 dbFirstRead.productFact(intent.capability, reference)
             }
             AgentCapability.LIST_CUSTOMERS -> readList(intent) { dbFirstRead.listCustomers() }
+            AgentCapability.LIST_SUPPLIERS -> readList(intent) {
+                intent.supplierRef?.let { reference ->
+                    dbFirstRead.supplierFact(reference)
+                } ?: dbFirstRead.listSuppliers()
+            }
             AgentCapability.LIST_RECEIVABLES -> readList(intent) { dbFirstRead.listReceivables() }
             AgentCapability.LIST_OVERDUE -> readList(intent) { dbFirstRead.listOverdue() }
             AgentCapability.ADD_CREDIT_ITEM -> previewCreditItem(intent)
             AgentCapability.REGISTER_CREDIT_PAYMENT -> previewCreditPayment(intent)
             AgentCapability.GET_CUSTOMER_BALANCE -> queryCustomerBalance(intent)
             AgentCapability.GET_CUSTOMER_TIMELINE -> queryCustomerTimeline(intent)
+            AgentCapability.GET_CUSTOMER_CONTACT -> readList(intent) {
+                val reference = intent.customerRef
+                    ?: return@readList DbFirstReadResult.NotFound("Não identifiquei o cliente do contato.")
+                dbFirstRead.customerContact(reference)
+            }
+            AgentCapability.CREATE_CUSTOMER -> previewCreateCustomer(intent)
+            AgentCapability.UPDATE_PRODUCT_PRICE -> previewUpdateProductPrice(intent)
+            AgentCapability.REGISTER_STOCK_ENTRY -> previewStockEntry(intent)
         }
     }
 
@@ -681,6 +715,86 @@ class TinoAgentBoundary @Inject constructor(
             throw error
         } catch (error: Throwable) {
             AgentResponse.Unsupported(error.message ?: "Não consegui preparar esse pagamento.")
+        }
+    }
+
+    private suspend fun previewCreateCustomer(intent: AgentIntent): AgentResponse {
+        val name = intent.customerName
+            ?: return AgentResponse.Unsupported("Não identifiquei o nome do cliente.")
+        val call = ToolCall(
+            name = CommerceToolName.CREATE_CUSTOMER,
+            arguments = buildMap {
+                put("name", name)
+                intent.customerPhone?.takeIf { it.isNotBlank() }?.let { put("phone", it) }
+            },
+        )
+        return try {
+            AgentResponse.ActionPreviewReady(
+                capability = intent.capability,
+                call = call,
+                preview = toolExecutor.preview(call),
+                dataSource = AgentDataSource.LOCAL_ONLY,
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            AgentResponse.Unsupported(error.message ?: "Não consegui preparar o cadastro do cliente.")
+        }
+    }
+
+    private suspend fun previewUpdateProductPrice(intent: AgentIntent): AgentResponse {
+        val product = intent.productRef
+            ?: return AgentResponse.Unsupported("Não identifiquei qual produto terá o preço alterado.")
+        val newPriceCents = intent.newPriceCents
+            ?: return AgentResponse.Unsupported("Não identifiquei o novo preço do produto.")
+        val call = ToolCall(
+            name = CommerceToolName.CHANGE_PRODUCT_PRICE,
+            arguments = mapOf(
+                "product" to product,
+                "new_price_cents" to newPriceCents.toString(),
+            ),
+        )
+        return try {
+            AgentResponse.ActionPreviewReady(
+                capability = intent.capability,
+                call = call,
+                preview = toolExecutor.preview(call),
+                dataSource = AgentDataSource.LOCAL_ONLY,
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            AgentResponse.Unsupported(error.message ?: "Não consegui preparar a alteração de preço.")
+        }
+    }
+
+    private suspend fun previewStockEntry(intent: AgentIntent): AgentResponse {
+        val product = intent.productRef
+            ?: return AgentResponse.Unsupported("Não identifiquei qual produto chegou.")
+        val quantity = intent.quantity
+            ?: return AgentResponse.Unsupported("Preciso da quantidade que chegou.")
+        val unitCostCents = intent.unitCostCents
+            ?: return AgentResponse.Unsupported("Preciso do custo unitário para preparar a entrada.")
+        val call = ToolCall(
+            name = CommerceToolName.REGISTER_STOCK_RECEIPT,
+            arguments = buildMap {
+                put("product", product)
+                put("quantity", quantity.toString())
+                put("unit_cost_cents", unitCostCents.toString())
+                intent.supplierRef?.takeIf { it.isNotBlank() }?.let { put("supplier", it) }
+            },
+        )
+        return try {
+            AgentResponse.ActionPreviewReady(
+                capability = intent.capability,
+                call = call,
+                preview = toolExecutor.preview(call),
+                dataSource = AgentDataSource.LOCAL_ONLY,
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            AgentResponse.Unsupported(error.message ?: "Não consegui preparar a entrada de mercadoria.")
         }
     }
 

@@ -26,12 +26,28 @@ data class A2uiSurfaceComponent(
     val componentId: String,
     val type: String,
     val props: Map<String, String> = emptyMap(),
+    /** Structured collection data for canonical catalog/list components. */
+    val items: List<A2uiCatalogItem> = emptyList(),
     /** Property name -> data-model path. Paths are relative to the surface model. */
     val bindings: Map<String, String> = emptyMap(),
     /** Declarative actions; the renderer only forwards the selected event. */
     val actions: List<String> = emptyList(),
     val actionLabels: Map<String, String> = emptyMap(),
     val actionPayloads: Map<String, Map<String, String>> = emptyMap(),
+)
+
+data class A2uiCatalogItem(
+    val itemId: String,
+    val iconKey: String? = null,
+    val title: String,
+    val context: String? = null,
+    val primaryText: String = "",
+    val secondaryText: String? = null,
+    val supportingText: String? = null,
+    val status: String = "NORMAL",
+    val actionName: String? = null,
+    val actionLabel: String? = null,
+    val actionPayload: Map<String, String> = emptyMap(),
 )
 
 data class A2uiSurfaceMessage(

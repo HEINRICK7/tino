@@ -18,4 +18,9 @@ class CommerceRulesTest {
     fun rejectsNonPositiveQuantity() {
         CommerceRules.saleTotal(500L, 0, 2, "Café")
     }
+
+    @Test
+    fun allowsMadeToOrderSaleWithoutStock() {
+        assertEquals(1_500L, CommerceRules.saleTotal(500L, 3, 0, "Bolo", stockTracked = false))
+    }
 }

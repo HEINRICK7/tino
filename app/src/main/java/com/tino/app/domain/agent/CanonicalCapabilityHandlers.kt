@@ -13,6 +13,9 @@ import com.tino.app.domain.usecase.ProductStockSnapshot
 import com.tino.app.domain.usecase.ProductCatalogItem
 import com.tino.app.domain.usecase.ReceivableSummary
 import com.tino.app.domain.usecase.OverdueReceivableSummary
+import com.tino.app.domain.usecase.RegisterStockEntryCommand
+import com.tino.app.domain.usecase.RegisterStockEntryUseCase
+import com.tino.app.domain.usecase.StockEntryRegisteredResult
 
 interface CapabilityHandler<I, O> {
     val capability: TinoCapabilityId
@@ -62,4 +65,11 @@ class RegisterCreditPaymentCapabilityHandler(
 ) : CapabilityHandler<RegisterCreditPaymentCommand, CreditPaymentResult> {
     override val capability = TinoCapabilityId.RECEIVE_CREDIT_PAYMENT
     override suspend fun execute(input: RegisterCreditPaymentCommand): CreditPaymentResult = useCase(input)
+}
+
+class RegisterStockEntryCapabilityHandler(
+    private val useCase: RegisterStockEntryUseCase,
+) : CapabilityHandler<RegisterStockEntryCommand, StockEntryRegisteredResult> {
+    override val capability = TinoCapabilityId.REGISTER_STOCK_ENTRY
+    override suspend fun execute(input: RegisterStockEntryCommand): StockEntryRegisteredResult = useCase(input)
 }

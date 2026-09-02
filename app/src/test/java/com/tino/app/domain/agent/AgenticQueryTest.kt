@@ -9,6 +9,7 @@ import com.tino.app.core.database.DirectReceiptEntity
 import com.tino.app.core.database.SaleEntity
 import com.tino.app.core.database.TinoDatabase
 import com.tino.app.domain.finance.FinancialProjectionRepository
+import com.tino.app.domain.voice.CommerceToolName
 import com.tino.app.domain.voice.ToolCall
 import com.tino.app.domain.voice.ToolExecutionResult
 import com.tino.app.domain.voice.ToolExecutor
@@ -112,11 +113,11 @@ class AgenticQueryTest {
     }
 
     @Test
-    fun fastFinancialQuestionDoesNotInvokeGemmaFallback() = runBlocking {
+    fun fastFinancialQuestionDoesNotInvokeModelFallback() = runBlocking {
         val coordinator = AgenticTextQueryCoordinator(
             interpreter = object : AgentIntentInterpreter {
                 override suspend fun interpret(input: String): AgentIntentResult =
-                    error("Gemma não deveria ser chamado para pergunta simples")
+                    error("O modelo não deveria ser chamado para pergunta simples")
             },
             boundary = boundary,
             a2uiMapper = com.tino.app.interfaceadapter.a2ui.FinancialSummaryA2uiMapper(),
@@ -132,11 +133,91 @@ class AgenticQueryTest {
     }
 
     @Test
+    fun semanticCapabilityPreservesOriginatingProductReference() = runBlocking {
+        var receivedIntent: AgentIntent? = null
+        val coordinator = AgenticTextQueryCoordinator(
+            interpreter = object : AgentIntentInterpreter {
+                override suspend fun interpret(input: String): AgentIntentResult =
+                    error("não deveria interpretar uma ação semântica")
+            },
+            boundary = object : AgentQueryBoundary {
+                override suspend fun ask(intent: AgentIntent): AgentResponse {
+                    receivedIntent = intent
+                    return AgentResponse.Unsupported("teste")
+                }
+            },
+            a2uiMapper = com.tino.app.interfaceadapter.a2ui.FinancialSummaryA2uiMapper(),
+        )
+
+        coordinator.askCapability(AgentCapability.GET_PRODUCT_STOCK, "product-42")
+
+        assertEquals("product-42", receivedIntent?.productRef)
+        assertEquals(null, receivedIntent?.customerRef)
+
+        coordinator.askCapability(AgentCapability.REPLENISHMENT_QUERY, "product-42")
+
+        assertEquals("product-42", receivedIntent?.productRef)
+
+        coordinator.askCapability(AgentCapability.LIST_PRODUCTS, "product-42")
+
+        assertEquals("product-42", receivedIntent?.productRef)
+
+        coordinator.askCapability(AgentCapability.LIST_SUPPLIERS, "supplier-42")
+
+        assertEquals("supplier-42", receivedIntent?.supplierRef)
+    }
+
+    @Test
+    fun canonicalStockEntryProducesPreviewWithoutExecutingMutation() = runBlocking {
+        var previewedCall: ToolCall? = null
+        var executed = false
+        val executor = object : ToolExecutor {
+            override suspend fun preview(call: ToolCall): ToolPreview {
+                previewedCall = call
+                return ToolPreview("Registrar entrada?", "Café Maratá · 12 · R$ 5,00")
+            }
+
+            override suspend fun execute(call: ToolCall, confirmed: Boolean): ToolExecutionResult {
+                executed = true
+                return ToolExecutionResult("registrado")
+            }
+        }
+        val boundaryWithStockEntry = TinoAgentBoundary(
+            FinancialSummaryQueryTool(
+                FinancialProjectionRepository(database.financialProjectionDao()),
+                clock,
+            ),
+            AgentSurfaceRenderer(),
+            executor,
+        )
+
+        val response = boundaryWithStockEntry.ask(
+            AgentIntent(
+                schemaVersion = AgentIntentSchema.VERSION,
+                capability = AgentCapability.REGISTER_STOCK_ENTRY,
+                period = AgentIntentPeriod.TODAY,
+                productRef = "Café Maratá",
+                quantity = 12,
+                unitCostCents = 500,
+                supplierRef = "Distribuidora Central",
+            ),
+        )
+
+        assertTrue(response is AgentResponse.ActionPreviewReady)
+        assertEquals(CommerceToolName.REGISTER_STOCK_RECEIPT, previewedCall?.name)
+        assertEquals("Café Maratá", previewedCall?.arguments?.get("product"))
+        assertEquals("12", previewedCall?.arguments?.get("quantity"))
+        assertEquals("500", previewedCall?.arguments?.get("unit_cost_cents"))
+        assertEquals("Distribuidora Central", previewedCall?.arguments?.get("supplier"))
+        assertTrue(!executed)
+    }
+
+    @Test
     fun fastReceivableQuestionRendersReceivableInsteadOfReceived() = runBlocking {
         val coordinator = AgenticTextQueryCoordinator(
             interpreter = object : AgentIntentInterpreter {
                 override suspend fun interpret(input: String): AgentIntentResult =
-                    error("Gemma não deveria ser chamado para pergunta simples")
+                    error("O modelo não deveria ser chamado para pergunta simples")
             },
             boundary = boundary,
             a2uiMapper = com.tino.app.interfaceadapter.a2ui.FinancialSummaryA2uiMapper(),
@@ -154,7 +235,7 @@ class AgenticQueryTest {
         val coordinator = AgenticTextQueryCoordinator(
             interpreter = object : AgentIntentInterpreter {
                 override suspend fun interpret(input: String): AgentIntentResult =
-                    error("Gemma não deveria ser chamado para resumo financeiro composto")
+                    error("O modelo não deveria ser chamado para resumo financeiro composto")
             },
             boundary = boundary,
             a2uiMapper = com.tino.app.interfaceadapter.a2ui.FinancialSummaryA2uiMapper(),
@@ -176,7 +257,7 @@ class AgenticQueryTest {
         val coordinator = AgenticTextQueryCoordinator(
             interpreter = object : AgentIntentInterpreter {
                 override suspend fun interpret(input: String): AgentIntentResult =
-                    error("Gemma não deveria ser chamado para consulta financeira determinística")
+                    error("O modelo não deveria ser chamado para consulta financeira determinística")
             },
             boundary = boundary,
             a2uiMapper = com.tino.app.interfaceadapter.a2ui.FinancialSummaryA2uiMapper(),
@@ -197,7 +278,7 @@ class AgenticQueryTest {
         val coordinator = AgenticTextQueryCoordinator(
             interpreter = object : AgentIntentInterpreter {
                 override suspend fun interpret(input: String): AgentIntentResult =
-                    error("Gemma não deveria ser chamado para listagem global de produtos")
+                    error("O modelo não deveria ser chamado para listagem global de produtos")
             },
             boundary = boundary,
             a2uiMapper = com.tino.app.interfaceadapter.a2ui.FinancialSummaryA2uiMapper(),
@@ -226,7 +307,7 @@ class AgenticQueryTest {
         val coordinator = AgenticTextQueryCoordinator(
             interpreter = object : AgentIntentInterpreter {
                 override suspend fun interpret(input: String): AgentIntentResult =
-                    error("Gemma não deveria ser chamado para comando global determinístico")
+                    error("O modelo não deveria ser chamado para comando global determinístico")
             },
             boundary = globalBoundary,
             a2uiMapper = com.tino.app.interfaceadapter.a2ui.FinancialSummaryA2uiMapper(),
@@ -255,7 +336,7 @@ class AgenticQueryTest {
         val coordinator = AgenticTextQueryCoordinator(
             interpreter = object : AgentIntentInterpreter {
                 override suspend fun interpret(input: String): AgentIntentResult =
-                    error("Gemma não deveria ser chamado para a retomada da escolha")
+                    error("O modelo não deveria ser chamado para a retomada da escolha")
             },
             boundary = TinoAgentBoundary(
                 financialSummaryTool = FinancialSummaryQueryTool(
@@ -309,7 +390,7 @@ class AgenticQueryTest {
         val coordinator = AgenticTextQueryCoordinator(
             interpreter = object : AgentIntentInterpreter {
                 override suspend fun interpret(input: String): AgentIntentResult =
-                    error("Gemma não deveria ser chamado para o fluxo contextual determinístico")
+                    error("O modelo não deveria ser chamado para o fluxo contextual determinístico")
             },
             boundary = contextualBoundary,
             a2uiMapper = com.tino.app.interfaceadapter.a2ui.FinancialSummaryA2uiMapper(),
@@ -343,7 +424,7 @@ class AgenticQueryTest {
         val coordinator = AgenticTextQueryCoordinator(
             interpreter = object : AgentIntentInterpreter {
                 override suspend fun interpret(input: String): AgentIntentResult =
-                    error("Gemma não deve receber o fluxo multiturno determinístico")
+                    error("O modelo não deve receber o fluxo multiturno determinístico")
             },
             boundary = TinoAgentBoundary(
                 financialSummaryTool = FinancialSummaryQueryTool(
@@ -383,7 +464,7 @@ class AgenticQueryTest {
         val coordinator = AgenticTextQueryCoordinator(
             interpreter = object : AgentIntentInterpreter {
                 override suspend fun interpret(input: String): AgentIntentResult =
-                    error("Gemma não deve receber cancelamento")
+                    error("O modelo não deve receber cancelamento")
             },
             boundary = TinoAgentBoundary(
                 financialSummaryTool = FinancialSummaryQueryTool(
@@ -427,7 +508,7 @@ class AgenticQueryTest {
         val coordinator = AgenticTextQueryCoordinator(
             interpreter = object : AgentIntentInterpreter {
                 override suspend fun interpret(input: String): AgentIntentResult =
-                    error("Gemma não deve receber correção contextual")
+                    error("O modelo não deve receber correção contextual")
             },
             boundary = contextualBoundary,
             a2uiMapper = com.tino.app.interfaceadapter.a2ui.FinancialSummaryA2uiMapper(),

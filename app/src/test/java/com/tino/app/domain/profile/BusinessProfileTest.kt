@@ -65,7 +65,8 @@ class BusinessProfileTest {
         assertTrue(module.capabilities.contains(TinoCapabilityId.LIST_PRODUCTS))
         assertTrue(module.capabilities.contains(TinoCapabilityId.REPLENISHMENT_QUERY))
         assertTrue(module.capabilities.contains(TinoCapabilityId.LIST_RECEIVABLES))
-        assertFalse(module.capabilities.contains(TinoCapabilityId.CREATE_CUSTOMER))
+        assertTrue(module.capabilities.contains(TinoCapabilityId.CREATE_CUSTOMER))
+        assertTrue(module.capabilities.contains(TinoCapabilityId.CHANGE_PRODUCT_PRICE))
     }
 
     @Test

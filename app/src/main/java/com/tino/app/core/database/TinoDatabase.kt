@@ -36,6 +36,7 @@ class TinoConverters {
 @Database(
     entities = [
         ProductEntity::class,
+        CatalogSyncStateEntity::class,
         SaleEntity::class,
         DirectReceiptEntity::class,
         SaleItemEntity::class,
@@ -51,6 +52,10 @@ class TinoConverters {
         SyncCursorEntity::class,
         StoreProfileEntity::class,
         FiscalImportEntity::class,
+        GoodsReceiptOperationEntity::class,
+        RemoteGoodsReceiptEntity::class,
+        RemoteGoodsReceiptItemEntity::class,
+        RemoteProductMappingEntity::class,
         SupplierProductMappingEntity::class,
         ProductPurchaseHistoryEntity::class,
         AgentActivityEntity::class,
@@ -60,13 +65,18 @@ class TinoConverters {
         BusinessMemoryEntity::class,
         RecommendationEntity::class,
         RecommendationOutcomeEntity::class,
+        AttentionEntity::class,
+        IntelligenceEvidenceEntity::class,
+        ApprovedKnowledgeCatalogEntity::class,
+        AttentionOutcomeEntity::class,
     ],
-    version = 20,
+    version = 29,
     exportSchema = true,
 )
 @TypeConverters(TinoConverters::class)
 abstract class TinoDatabase : RoomDatabase() {
     abstract fun productDao(): ProductDao
+    abstract fun catalogSyncStateDao(): CatalogSyncStateDao
     abstract fun saleDao(): SaleDao
     abstract fun directReceiptDao(): DirectReceiptDao
     abstract fun financialProjectionDao(): FinancialProjectionDao
@@ -78,6 +88,9 @@ abstract class TinoDatabase : RoomDatabase() {
     abstract fun purchaseDao(): PurchaseDao
     abstract fun orderDao(): OrderDao
     abstract fun fiscalImportDao(): FiscalImportDao
+    abstract fun goodsReceiptOperationDao(): GoodsReceiptOperationDao
+    abstract fun remoteGoodsReceiptDao(): RemoteGoodsReceiptDao
+    abstract fun remoteProductMappingDao(): RemoteProductMappingDao
     abstract fun supplierProductMappingDao(): SupplierProductMappingDao
     abstract fun productPurchaseHistoryDao(): ProductPurchaseHistoryDao
     abstract fun syncCursorDao(): SyncCursorDao
@@ -88,6 +101,9 @@ abstract class TinoDatabase : RoomDatabase() {
     abstract fun mutationOperationDao(): MutationOperationDao
     abstract fun businessMemoryDao(): BusinessMemoryDao
     abstract fun recommendationDao(): RecommendationDao
+    abstract fun attentionDao(): AttentionDao
+    abstract fun intelligenceEvidenceDao(): IntelligenceEvidenceDao
+    abstract fun approvedKnowledgeCatalogDao(): ApprovedKnowledgeCatalogDao
 }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -288,5 +304,101 @@ val MIGRATION_19_20 = object : Migration(19, 20) {
         database.execSQL("ALTER TABLE recommendations ADD COLUMN quality TEXT NOT NULL DEFAULT 'COMPLETE'")
         database.execSQL("ALTER TABLE recommendations ADD COLUMN featureVersion TEXT NOT NULL DEFAULT 'inventory-features-v1'")
         database.execSQL("ALTER TABLE recommendations ADD COLUMN modelVersion TEXT NOT NULL DEFAULT 'local-heuristic-v1'")
+    }
+}
+
+val MIGRATION_20_21 = object : Migration(20, 21) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("ALTER TABLE credit_entries ADD COLUMN ledgerType TEXT")
+        database.execSQL("ALTER TABLE credit_entries ADD COLUMN provenance TEXT")
+        database.execSQL("ALTER TABLE credit_entries ADD COLUMN reason TEXT")
+    }
+}
+
+val MIGRATION_21_22 = object : Migration(21, 22) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL(
+            "CREATE TABLE IF NOT EXISTS attention_items (id TEXT NOT NULL PRIMARY KEY, insightId TEXT NOT NULL, subjectId TEXT, title TEXT NOT NULL, explanation TEXT NOT NULL, evidenceIdsJson TEXT NOT NULL, relevance INTEGER NOT NULL, urgency INTEGER NOT NULL, confidence REAL NOT NULL, state TEXT NOT NULL, snoozedUntilEpochMs INTEGER, createdAtEpochMs INTEGER NOT NULL, lastSeenAtEpochMs INTEGER NOT NULL)",
+        )
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_attention_items_state ON attention_items(state)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_attention_items_lastSeenAtEpochMs ON attention_items(lastSeenAtEpochMs)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_attention_items_subjectId ON attention_items(subjectId)")
+    }
+}
+
+val MIGRATION_22_23 = object : Migration(22, 23) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL(
+            "CREATE TABLE IF NOT EXISTS intelligence_evidence (id TEXT NOT NULL PRIMARY KEY, type TEXT NOT NULL, subjectId TEXT, factsJson TEXT NOT NULL, source TEXT NOT NULL, confidence REAL NOT NULL, occurredAtEpochMs INTEGER, detectedAtEpochMs INTEGER NOT NULL)",
+        )
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_intelligence_evidence_subjectId ON intelligence_evidence(subjectId)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_intelligence_evidence_detectedAtEpochMs ON intelligence_evidence(detectedAtEpochMs)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_intelligence_evidence_type ON intelligence_evidence(type)")
+    }
+}
+
+val MIGRATION_23_24 = object : Migration(23, 24) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL(
+            "CREATE TABLE IF NOT EXISTS attention_outcomes (id TEXT NOT NULL PRIMARY KEY, attentionId TEXT NOT NULL, outcome TEXT NOT NULL, occurredAtEpochMs INTEGER NOT NULL)",
+        )
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_attention_outcomes_attentionId ON attention_outcomes(attentionId)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_attention_outcomes_occurredAtEpochMs ON attention_outcomes(occurredAtEpochMs)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_attention_outcomes_outcome ON attention_outcomes(outcome)")
+    }
+}
+
+val MIGRATION_24_25 = object : Migration(24, 25) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("ALTER TABLE purchases ADD COLUMN expectedDeliveryAt INTEGER")
+        database.execSQL("ALTER TABLE purchases ADD COLUMN receivedAt INTEGER")
+    }
+}
+
+val MIGRATION_25_26 = object : Migration(25, 26) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL(
+            "CREATE TABLE IF NOT EXISTS approved_knowledge_catalogs (version TEXT NOT NULL PRIMARY KEY, payloadJson TEXT NOT NULL, activatedAtEpochMs INTEGER NOT NULL, state TEXT NOT NULL)",
+        )
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_approved_knowledge_catalogs_state ON approved_knowledge_catalogs(state)")
+    }
+}
+
+val MIGRATION_26_27 = object : Migration(26, 27) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL(
+            "CREATE TABLE IF NOT EXISTS goods_receipt_operations (operationId TEXT NOT NULL PRIMARY KEY, businessId TEXT NOT NULL, operationType TEXT NOT NULL, logicalReference TEXT NOT NULL, idempotencyKey TEXT NOT NULL, documentId TEXT, previewId TEXT, receiptId TEXT, requestJson TEXT, status TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)",
+        )
+        database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_goods_receipt_operations_businessId_operationType_logicalReference ON goods_receipt_operations(businessId, operationType, logicalReference)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_goods_receipt_operations_status ON goods_receipt_operations(status)")
+        database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_goods_receipt_operations_receiptId ON goods_receipt_operations(receiptId)")
+        database.execSQL(
+            "CREATE TABLE IF NOT EXISTS remote_goods_receipts (receiptId TEXT NOT NULL PRIMARY KEY, businessId TEXT NOT NULL, previewId TEXT, documentId TEXT, status TEXT NOT NULL, itemCount INTEGER NOT NULL, projectedAt INTEGER NOT NULL)",
+        )
+        database.execSQL(
+            "CREATE TABLE IF NOT EXISTS remote_goods_receipt_items (receiptId TEXT NOT NULL, lineNumber INTEGER NOT NULL, remoteProductId TEXT NOT NULL, localProductId TEXT NOT NULL, productName TEXT NOT NULL, baseUnit TEXT NOT NULL, quantityAdded TEXT NOT NULL, unitCost TEXT NOT NULL, projectedAt INTEGER NOT NULL, PRIMARY KEY(receiptId, lineNumber))",
+        )
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_remote_goods_receipt_items_localProductId ON remote_goods_receipt_items(localProductId)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_remote_goods_receipt_items_remoteProductId ON remote_goods_receipt_items(remoteProductId)")
+        database.execSQL(
+            "CREATE TABLE IF NOT EXISTS remote_product_mappings (mappingId TEXT NOT NULL PRIMARY KEY, businessId TEXT NOT NULL, remoteProductId TEXT NOT NULL, localProductId TEXT NOT NULL, createdAt INTEGER NOT NULL)",
+        )
+        database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_remote_product_mappings_businessId_remoteProductId ON remote_product_mappings(businessId, remoteProductId)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_remote_product_mappings_localProductId ON remote_product_mappings(localProductId)")
+    }
+}
+
+val MIGRATION_27_28 = object : Migration(27, 28) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("ALTER TABLE products ADD COLUMN gtin TEXT")
+        database.execSQL(
+            "CREATE TABLE IF NOT EXISTS catalog_sync_state (businessId TEXT NOT NULL PRIMARY KEY, status TEXT NOT NULL, lastSuccessfulAt INTEGER, completedAt INTEGER, total INTEGER NOT NULL, accepted INTEGER NOT NULL, rejected INTEGER NOT NULL, possiblyPartial INTEGER NOT NULL, errorMessage TEXT)",
+        )
+    }
+}
+
+val MIGRATION_28_29 = object : Migration(28, 29) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("ALTER TABLE products ADD COLUMN stockTracked INTEGER NOT NULL DEFAULT 1")
     }
 }

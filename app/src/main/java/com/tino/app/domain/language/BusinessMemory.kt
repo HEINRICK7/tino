@@ -122,7 +122,7 @@ interface BusinessMemoryPort {
     suspend fun list(scopeKey: String): List<BusinessMemoryRecord>
 }
 
-/** Application policy around the storage port; no Room or ADK dependency. */
+/** Application policy around the storage port; no Room or model dependency. */
 @Singleton
 class GovernedBusinessMemory @Inject constructor(
     private val store: BusinessMemoryStorePort,

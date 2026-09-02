@@ -185,11 +185,11 @@ class PredictiveRecommendationService @Inject constructor(
         val generated = engine.generate(signals)
         val existingKeys = repository.pending()
             .mapTo(mutableSetOf()) { "${it.type.name}:${it.productId}" }
-        val recommendations = generated.filterNot { "${it.type.name}:${it.productId}" in existingKeys }
-        repository.saveAll(recommendations)
+        val newRecommendations = generated.filterNot { "${it.type.name}:${it.productId}" in existingKeys }
+        repository.saveAll(newRecommendations)
         return PredictiveInventoryResult(
             signals = signals,
-            recommendations = generated,
+            recommendations = newRecommendations,
             generatedAt = Instant.ofEpochMilli(nowEpochMs),
         )
     }

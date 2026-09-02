@@ -22,6 +22,9 @@ class IntelligenceA2uiMapper @Inject constructor() {
                 if (response.knowledgeUsed.isNotEmpty()) {
                     add(A2uiDetailRow("Fontes", response.knowledgeUsed.joinToString()))
                 }
+                response.knowledgeCatalogVersion?.let { version ->
+                    add(A2uiDetailRow("Catálogo", version))
+                }
             },
             limitations = response.limitations,
             dataSource = if (response.knowledgeUsed.isNotEmpty()) "APPROVED_KNOWLEDGE" else "LOCAL_FACTS",

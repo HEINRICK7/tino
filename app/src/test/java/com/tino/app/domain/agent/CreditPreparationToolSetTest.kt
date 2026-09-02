@@ -50,6 +50,7 @@ class CreditPreparationToolSetTest {
         )
         repository.createProduct("Café Maratá", 850, 24)
         repository.createCustomer("Maria Lina")
+        Unit
     }
 
     @After

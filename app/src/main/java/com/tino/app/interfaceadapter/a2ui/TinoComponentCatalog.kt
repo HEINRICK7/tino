@@ -177,6 +177,8 @@ object CoreTinoComponentCatalog : TinoComponentCatalogContributor {
 object TinoCustomComponentCatalog : TinoComponentCatalogContributor {
     const val METRIC_CARD = "tino.metric_card"
     const val PRODUCT_CARD = "tino.product_card"
+    const val CATALOG_CARD = "tino.catalog_card"
+    const val CATALOG_LIST_CARD = "tino.catalog_list_card"
     const val CUSTOMER_CARD = "tino.customer_card"
     const val DEBT_CARD = "tino.debt_card"
     const val INVENTORY_ALERT_CARD = "tino.inventory_alert_card"
@@ -186,6 +188,9 @@ object TinoCustomComponentCatalog : TinoComponentCatalogContributor {
     const val CONFIRMATION_CARD = "tino.confirmation_card"
     const val STATUS_CARD = "tino.status_card"
     const val MINI_CHART = "tino.mini_chart"
+    const val ACTION_LIST_CARD = "tino.action_list_card"
+    const val TIMELINE_CARD = "tino.timeline_card"
+    const val EMPTY_STATE_CARD = "tino.empty_state_card"
 
     private val REQUEST_DETAILS = TinoActionDescriptor(
         name = "request_details",
@@ -206,6 +211,10 @@ object TinoCustomComponentCatalog : TinoComponentCatalogContributor {
             .copy(actions = listOf(REQUEST_DETAILS)),
         descriptor(PRODUCT_CARD, TinoComponentGroup.BUSINESS, "icon", "title", "context", "value", "supportingText", "status")
             .copy(actions = listOf(REQUEST_DETAILS)),
+        descriptor(CATALOG_CARD, TinoComponentGroup.BUSINESS, "icon", "title", "context", "value", "supportingText", "status")
+            .copy(actions = listOf(REQUEST_DETAILS)),
+        descriptor(CATALOG_LIST_CARD, TinoComponentGroup.BUSINESS, "title", "emptyMessage")
+            .copy(actions = listOf(REQUEST_DETAILS, CoreTinoComponentCatalog.SELECT_TAB)),
         descriptor(CUSTOMER_CARD, TinoComponentGroup.BUSINESS, "icon", "title", "context", "supportingText", "status")
             .copy(actions = listOf(REQUEST_DETAILS)),
         descriptor(DEBT_CARD, TinoComponentGroup.BUSINESS, "icon", "title", "context", "value", "supportingText", "status")
@@ -222,6 +231,9 @@ object TinoCustomComponentCatalog : TinoComponentCatalogContributor {
         descriptor(STATUS_CARD, TinoComponentGroup.DISPLAY, "title", "message", "status")
             .copy(actions = listOf(RETRY)),
         descriptor(MINI_CHART, TinoComponentGroup.DISPLAY, "title", "value", "series", "labels"),
+        descriptor(ACTION_LIST_CARD, TinoComponentGroup.INTERACTION, "title", "items"),
+        descriptor(TIMELINE_CARD, TinoComponentGroup.BUSINESS, "title", "items"),
+        descriptor(EMPTY_STATE_CARD, TinoComponentGroup.DISPLAY, "title", "message"),
     )
 
     private fun descriptor(

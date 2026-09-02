@@ -49,6 +49,9 @@ data class IntelligenceResponse(
     val analyticsUsed: List<String> = emptyList(),
     val memoryUsed: List<String> = emptyList(),
     val knowledgeUsed: List<String> = emptyList(),
+    val knowledgeCatalogVersion: String? = null,
+    val knowledgeRetrievalMode: KnowledgeRetrievalMode? = null,
+    val knowledgeLatencyMs: Long? = null,
     val confidence: Double = 0.0,
     val limitations: List<String> = emptyList(),
 )
@@ -63,37 +66,6 @@ class UnavailableIntelligenceRuntime : IntelligenceRuntimePort {
         status = IntelligenceResponseStatus.UNSUPPORTED,
         answer = "Ainda não tenho dados e ferramentas suficientes para responder isso com segurança.",
     )
-}
-
-/** The official orchestrator boundary. It deliberately contains no ADK types. */
-interface GoogleAdkOrchestratorPort {
-    suspend fun execute(
-        request: IntelligenceRequest,
-        tools: List<IntelligenceToolDefinition>,
-    ): IntelligenceResponse?
-}
-
-/** Explicit fallback until an approved Google ADK engine is wired into Android. */
-@Singleton
-class UnavailableGoogleAdkOrchestrator @Inject constructor() : GoogleAdkOrchestratorPort {
-    override suspend fun execute(
-        request: IntelligenceRequest,
-        tools: List<IntelligenceToolDefinition>,
-    ): IntelligenceResponse? = null
-}
-
-/**
- * Isolates the optional Google ADK engine from the rest of the app.
- * Until an approved Android ADK dependency is supplied, the deterministic
- * local runtime remains the safe execution path.
- */
-@Singleton
-class GoogleAdkRuntimeAdapter @Inject constructor(
-    private val orchestrator: GoogleAdkOrchestratorPort,
-    private val localRuntime: DeterministicIntelligenceRuntime,
-) : IntelligenceRuntimePort {
-    override suspend fun execute(request: IntelligenceRequest): IntelligenceResponse =
-        orchestrator.execute(request, TinoIntelligenceToolRegistry.all) ?: localRuntime.execute(request)
 }
 
 enum class IntelligenceToolKind { FACT, ANALYTIC, MEMORY, KNOWLEDGE, MUTATION }
@@ -174,6 +146,7 @@ data class IntelligencePaymentEvent(
     val type: PaymentEventType,
     val amountCents: Long,
     val occurredAtEpochMs: Long,
+    val dueAtEpochMs: Long? = null,
 )
 
 enum class PaymentEventType { SALE, PAYMENT }
@@ -183,6 +156,33 @@ data class IntelligenceProduct(
     val name: String,
     val priceCents: Long,
     val stockQuantity: Int,
+)
+
+data class IntelligenceSupplierLink(
+    val productId: String,
+    val supplierId: String,
+    val supplierName: String,
+    val linkedAtEpochMs: Long,
+)
+
+data class IntelligenceSupplierPurchase(
+    val productId: String,
+    val supplierId: String,
+    val supplierName: String,
+    val purchasedAtEpochMs: Long,
+    val quantity: Int,
+    val unitCostCents: Long,
+)
+
+data class IntelligenceSupplierDelivery(
+    val purchaseId: String,
+    val productId: String,
+    val supplierId: String,
+    val supplierName: String,
+    val orderedAtEpochMs: Long,
+    val expectedDeliveryAtEpochMs: Long?,
+    val receivedAtEpochMs: Long?,
+    val quantity: Int,
 )
 
 data class IntelligenceStockMovement(
@@ -207,6 +207,9 @@ interface IntelligenceFactsPort {
     suspend fun products(): List<IntelligenceProduct>
     suspend fun resolveProduct(reference: String): IntelligenceEntityResolution<IntelligenceProduct>
     suspend fun stockMovements(productId: String): List<IntelligenceStockMovement>
+    suspend fun supplierLinks(): List<IntelligenceSupplierLink> = emptyList()
+    suspend fun supplierPurchases(): List<IntelligenceSupplierPurchase> = emptyList()
+    suspend fun supplierDeliveries(): List<IntelligenceSupplierDelivery> = emptyList()
 }
 
 enum class MemoryType { ENTITY_ALIAS, INTERACTION_PREFERENCE, BUSINESS_CONTEXT, USER_WORKFLOW }
@@ -269,10 +272,80 @@ data class KnowledgeAnswer(
     val sources: List<String>,
     val confidence: Double,
     val timestampEpochMs: Long,
+    val catalogVersion: String = "unknown",
+    val retrievalMode: KnowledgeRetrievalMode = KnowledgeRetrievalMode.LOCAL_APPROVED,
+    val latencyMs: Long = 0L,
 )
+
+enum class KnowledgeRetrievalMode { LOCAL_APPROVED, EXTERNAL_APPROVED }
 
 interface KnowledgeQueryPort {
     suspend fun query(request: KnowledgeQuery): KnowledgeAnswer?
+}
+
+/**
+ * Small, versioned, offline corpus for stable product/help explanations.
+ * It is intentionally not a substitute for transactional facts or a generic
+ * LLM/RAG system: an unknown term remains unavailable instead of being guessed.
+ */
+@Singleton
+class LocalApprovedKnowledgeAdapter @Inject constructor(
+    private val catalog: ApprovedKnowledgeCatalogPort,
+    private val metrics: KnowledgeRetrievalMetricsPort,
+) : KnowledgeQueryPort {
+    constructor() : this(
+        VersionedApprovedKnowledgeCatalog(BuiltInApprovedKnowledgeCatalog.current),
+        InMemoryKnowledgeRetrievalMetrics(),
+    )
+
+    constructor(catalog: ApprovedKnowledgeCatalogPort) : this(catalog, InMemoryKnowledgeRetrievalMetrics())
+
+    override suspend fun query(request: KnowledgeQuery): KnowledgeAnswer? {
+        val startedAt = System.nanoTime()
+        fun elapsedMs() = ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0L)
+        val normalizedQuery = IntelligenceTextNormalizer.normalize(request.query)
+        if (normalizedQuery.isBlank()) {
+            metrics.record(answered = false, latencyMs = elapsedMs())
+            return null
+        }
+        val activeCatalog = catalog.current()
+        val entry = activeCatalog.entries
+            .asSequence()
+            .filter { request.allowedCollections.isEmpty() || it.collection in request.allowedCollections }
+            .map { it to score(normalizedQuery, it) }
+            .filter { (_, score) -> score > 0 }
+            .maxByOrNull { (_, score) -> score }
+            ?.first
+            ?: run {
+                metrics.record(answered = false, latencyMs = elapsedMs())
+                return null
+            }
+        val exact = entry.phrases.any { normalizedQuery.contains(it) }
+        val latencyMs = elapsedMs()
+        metrics.record(answered = true, latencyMs = latencyMs)
+        return KnowledgeAnswer(
+            answer = entry.answer,
+            sources = listOf(entry.sourceRef ?: "builtin:${entry.collection}:${activeCatalog.version}:${entry.id}"),
+            confidence = if (exact) 0.95 else 0.82,
+            timestampEpochMs = System.currentTimeMillis(),
+            catalogVersion = activeCatalog.version,
+            retrievalMode = KnowledgeRetrievalMode.LOCAL_APPROVED,
+            latencyMs = latencyMs,
+        )
+    }
+
+    private fun score(query: String, entry: ApprovedKnowledgeEntry): Int {
+        val phraseMatch = entry.phrases.any { query.contains(it) }
+        val keywordMatches = entry.keywords.count { keyword ->
+            query.split(Regex("\\s+")).any { token -> token == keyword || token.startsWith(keyword) }
+        }
+        return when {
+            phraseMatch -> 10 + keywordMatches
+            keywordMatches >= 2 -> keywordMatches
+            else -> 0
+        }
+    }
+
 }
 
 @Singleton
@@ -476,7 +549,7 @@ class DeterministicIntelligenceRuntime @Inject constructor(
         validationResult = validationResult,
         validationErrors = validationErrors,
         validationRejectionKinds = classifyValidationRejections(validationErrors),
-        fallbackUsed = plannerUsedLabel(plan) == "ADK_FALLBACK_DETERMINISTIC",
+        fallbackUsed = false,
         executionResult = executionResult,
         groundingCompleteness = groundingCompleteness(plan, validationResult, executionResult, response),
         latencyMs = System.currentTimeMillis() - startedAt,
@@ -485,16 +558,9 @@ class DeterministicIntelligenceRuntime @Inject constructor(
         occurredAtEpochMs = System.currentTimeMillis(),
     )
 
-    private fun plannerSelectedLabel(): String = when (planner.id.lowercase(Locale.ROOT)) {
-        "adk" -> "ADK"
-        else -> "DETERMINISTIC"
-    }
+    private fun plannerSelectedLabel(): String = "DETERMINISTIC"
 
-    private fun plannerUsedLabel(plan: IntelligencePlan?): String = when {
-        plan?.plannerId == "adk" -> "ADK"
-        plan?.plannerId?.endsWith("-fallback") == true -> "ADK_FALLBACK_DETERMINISTIC"
-        else -> "DETERMINISTIC"
-    }
+    private fun plannerUsedLabel(plan: IntelligencePlan?): String = "DETERMINISTIC"
 
     private fun groundingCompleteness(
         plan: IntelligencePlan?,
@@ -537,6 +603,6 @@ class DeterministicIntelligenceRuntime @Inject constructor(
         }.distinct()
 
     companion object {
-        private const val GLOBAL_TIMEOUT_MS = 8_000L
+        private const val GLOBAL_TIMEOUT_MS = 10_000L
     }
 }

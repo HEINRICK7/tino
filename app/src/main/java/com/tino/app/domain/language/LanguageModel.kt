@@ -89,6 +89,7 @@ data class IntentInterpretation(
     val references: List<EntityReference> = emptyList(),
     val quantity: ParsedQuantity? = null,
     val amountCents: Long? = null,
+    val unitCostCents: Long? = null,
     val paymentMethod: PaymentMethod? = null,
     val source: LanguageSource,
     val transcript: String,

@@ -1,7 +1,9 @@
 package com.tino.app
 import android.Manifest
+import android.app.Activity
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -13,8 +15,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,12 +43,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -44,22 +61,32 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -75,8 +102,21 @@ import com.tino.app.core.database.SupplierEntity
 import com.tino.fiscal.core.ProductImportResult
 import com.tino.app.R
 import com.tino.app.feature.home.TinoViewModel
-import com.tino.app.feature.voice.VoiceUiState
-import com.tino.app.feature.voice.VoiceViewModel
+import com.tino.app.feature.receiving.GoodsReceiptViewModel
+import com.tino.app.domain.receiving.GoodsReceiptConfirmation
+import com.tino.app.domain.receiving.GoodsReceiptPreview
+import com.tino.app.domain.receiving.GoodsReceiptRemoteState
+import com.tino.app.domain.nfce.PurchaseHistory
+import com.tino.app.domain.nfce.PurchaseHistoryDetail
+import com.tino.app.domain.nfce.PurchaseInsight
+import com.tino.app.domain.catalog.CatalogSyncState
+import com.tino.app.domain.catalog.CatalogSyncStatus
+import com.tino.app.domain.catalog.CatalogSyncDiagnostics
+import com.tino.app.domain.onboarding.OnboardingState
+import com.tino.app.domain.onboarding.BusinessDataSourceType
+import com.tino.app.domain.onboarding.OnboardingDataSourceChoice
+import com.tino.app.domain.onboarding.OtpChallenge
+import com.tino.app.domain.onboarding.OtpCodeAttempt
 import com.tino.app.feature.voice.ContextualVoiceState
 import com.tino.app.feature.voice.ContextualVoiceViewModel
 import com.tino.app.feature.voice.AgenticVoiceState
@@ -94,16 +134,39 @@ import com.tino.app.feature.fiscal.DocumentUploadScreen
 import com.tino.app.domain.voice.VoiceContext
 import com.tino.app.ui.a2ui.TinoA2UiRenderer
 import com.tino.app.ui.a2ui.TinoA2UiSurfaceHost
+import com.tino.app.ui.a2ui.TinoAgentCatalogSurface
+import com.tino.app.ui.a2ui.TinoVoiceBackgroundSurface
+import com.tino.app.ui.a2ui.isVoiceBackground
+import com.tino.app.ui.a2ui.presentsBottomRiseCatalog
 import com.tino.app.interfaceadapter.a2ui.A2uiSurfaceMessage
 import com.tino.app.interfaceadapter.a2ui.A2uiSurfaceOperation
 import com.tino.app.interfaceadapter.a2ui.A2uiSurfaceComponent
 import com.tino.app.interfaceadapter.a2ui.CoreTinoComponentCatalog
 import com.tino.app.domain.commerce.PaymentMethod
 import com.tino.app.domain.commerce.CustomerCreditTimeline
+import com.tino.app.domain.commerce.SharedLedgerEventType
+import com.tino.app.domain.commerce.SharedLedgerStatement
+import com.tino.app.domain.commerce.SharedLedgerStatementFormatter
 import com.tino.app.ui.components.TinoBottomNavigation
 import com.tino.app.ui.components.TinoCard
+import com.tino.app.ui.components.TinoCardSurface
+import com.tino.app.ui.components.TinoCardStatus
+import com.tino.app.ui.components.TinoCardRenderer
+import com.tino.app.ui.components.TinoCardSpec
+import com.tino.app.ui.components.LocalTinoScrollTelemetry
+import com.tino.app.ui.components.tinoClickable
+import com.tino.app.ui.components.tinoAnimateContentSize
+import com.tino.app.ui.components.tinoEnter
+import com.tino.app.ui.components.tinoExit
+import com.tino.app.ui.components.tinoScreenContentTransform
+import com.tino.app.ui.theme.LocalTinoReduceMotion
+import com.tino.app.ui.components.tinoSharedBounds
+import com.tino.app.ui.components.TinoSharedKeys
+import com.tino.app.ui.components.tinoInteractiveBounds
+import com.tino.app.ui.components.tinoOccupiedBounds
 import com.tino.app.ui.components.TinoCustomerRow
 import com.tino.app.ui.components.TinoEmptyState
+import com.tino.app.ui.components.TinoLoadingState
 import com.tino.app.ui.components.TinoIconButton
 import com.tino.app.ui.components.TinoInsightCard
 import com.tino.app.ui.components.TinoQuickActionCard
@@ -111,8 +174,8 @@ import com.tino.app.ui.components.TinoSectionHeader
 import com.tino.app.ui.components.TinoHorizontalCarousel
 import com.tino.app.ui.components.TinoActionTile
 import com.tino.app.ui.components.TinoMetricCard
+import com.tino.app.ui.components.TinoListRow
 import com.tino.app.ui.components.TinoMenuRow
-import com.tino.app.ui.components.TinoMenuCard
 import com.tino.app.ui.components.TinoMoneyField
 import com.tino.app.ui.components.TinoNavDestination
 import com.tino.app.ui.components.TinoOfflineBanner
@@ -127,10 +190,16 @@ import com.tino.app.ui.components.TinoSectionLabel
 import com.tino.app.ui.components.TinoStatus
 import com.tino.app.ui.components.TinoStatusBadge
 import com.tino.app.ui.components.TinoFilterChip
+import com.tino.app.ui.components.TinoSystemAction
+import com.tino.app.ui.components.TinoSystemActionListCard
 import com.tino.app.ui.components.TinoSupplierRow
+import com.tino.app.ui.illustration.TinoIllustrationState
 import com.tino.app.ui.components.TinoSyncIndicator
 import com.tino.app.ui.components.TinoTextField
 import com.tino.app.ui.components.TinoTopBar
+import com.tino.app.ui.components.TinoTextAction
+import com.tino.app.ui.components.TinoContextHeader
+import com.tino.app.ui.components.TinoHeaderStyle
 import com.tino.app.ui.components.TinoVoiceCard
 import com.tino.app.ui.components.TinoVoiceFab
 import com.tino.app.ui.components.TinoVoiceFabState
@@ -157,7 +226,6 @@ import com.tino.app.ui.theme.TinoShapes
 import com.tino.app.ui.theme.TinoTheme
 import com.tino.app.core.ui.AppOrientationController
 import com.tino.app.presentation.splash.TinoSplashScreen
-import com.tino.app.domain.agent.ScreenAgentContext
 import com.tino.app.domain.agent.TinoAgentSession
 import com.tino.app.domain.agent.TinoAgentSessionSnapshot
 import com.tino.app.domain.agent.AgentCapability
@@ -172,8 +240,7 @@ import com.tino.app.domain.agent.TinoCapabilityRegistry
 import com.tino.app.domain.agent.FastNavigationTarget
 import com.tino.app.domain.agent.requiredCapability
 import com.tino.app.domain.intelligence.Recommendation
-import com.tino.app.domain.language.EntityReference
-import com.tino.app.domain.language.LanguageEntityType
+import com.tino.app.domain.intelligence.AttentionRecord
 import dagger.hilt.android.AndroidEntryPoint
 import java.text.NumberFormat
 import java.util.Locale
@@ -181,16 +248,62 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun TinoApp(
+internal fun TinoApp(openNotification: Boolean = false) {
+    val application = LocalContext.current.applicationContext as? TinoApplication
+    val reduceMotion = LocalTinoReduceMotion.current
+    var contentReady by remember { mutableStateOf(false) }
+    var splashFinished by remember { mutableStateOf(false) }
+    var splashOnScreen by remember { mutableStateOf(true) }
+    val splashAlpha = remember { Animatable(1f) }
+
+    LaunchedEffect(splashFinished, contentReady, reduceMotion) {
+        if (!splashFinished) return@LaunchedEffect
+        if (reduceMotion) {
+            splashAlpha.snapTo(0f)
+            splashOnScreen = false
+            return@LaunchedEffect
+        }
+        splashAlpha.animateTo(0f, tween(durationMillis = 400, easing = FastOutSlowInEasing))
+        delay(32)
+        splashOnScreen = false
+    }
+
+    Box(Modifier.fillMaxSize().background(TinoPaper)) {
+        TinoAppContent(
+            onReady = { contentReady = true },
+            openNotification = openNotification,
+        )
+        if (splashOnScreen) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .zIndex(1f)
+                    .graphicsLayer { alpha = splashAlpha.value },
+            ) {
+                TinoSplashScreen(
+                    onFirstFrame = { application?.startDeferredRuntime() },
+                    onFinished = { splashFinished = true },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TinoAppContent(
+    onReady: () -> Unit,
+    openNotification: Boolean,
     viewModel: TinoViewModel = hiltViewModel(),
-    voiceViewModel: VoiceViewModel = hiltViewModel(),
     contextualVoiceViewModel: ContextualVoiceViewModel = hiltViewModel(),
     agenticVoiceViewModel: AgenticVoiceViewModel = hiltViewModel(),
     agentSessionViewModel: TinoAgentSessionViewModel = hiltViewModel(),
+    goodsReceiptViewModel: GoodsReceiptViewModel = hiltViewModel(),
+    nfcePreviewViewModel: com.tino.app.feature.nfce.NfcePreviewViewModel = hiltViewModel(),
 ) {
     val products by viewModel.products.collectAsStateWithLifecycle()
     val customers by viewModel.customers.collectAsStateWithLifecycle()
     val customerTimeline by viewModel.customerTimeline.collectAsStateWithLifecycle()
+    val customerLedgerStatement by viewModel.customerLedgerStatement.collectAsStateWithLifecycle()
     val todayTotal by viewModel.todayTotalCents.collectAsStateWithLifecycle()
     val todayReceived by viewModel.todayReceivedCents.collectAsStateWithLifecycle()
     val todayCash by viewModel.todayCashCents.collectAsStateWithLifecycle()
@@ -199,16 +312,26 @@ internal fun TinoApp(
     val todaySales by viewModel.todaySalesCount.collectAsStateWithLifecycle()
     val suppliers by viewModel.suppliers.collectAsStateWithLifecycle()
     val orders by viewModel.orders.collectAsStateWithLifecycle()
+    val supplierPurchases by viewModel.supplierPurchases.collectAsStateWithLifecycle()
     val orderDetail by viewModel.orderDetail.collectAsStateWithLifecycle()
     val pendingSyncCount by viewModel.pendingSyncCount.collectAsStateWithLifecycle()
+    val catalogSyncState by viewModel.catalogSyncState.collectAsStateWithLifecycle()
+    val catalogDiagnostics by viewModel.catalogDiagnostics.collectAsStateWithLifecycle()
     val storeProfile by viewModel.storeProfile.collectAsStateWithLifecycle()
     val profileLoaded by viewModel.profileLoaded.collectAsStateWithLifecycle()
+    val authenticated by viewModel.authenticated.collectAsStateWithLifecycle()
+    val remoteBusinessId by viewModel.remoteBusinessId.collectAsStateWithLifecycle()
+    val onboardingState by viewModel.onboardingState.collectAsStateWithLifecycle()
     val businessProfile by viewModel.businessProfile.collectAsStateWithLifecycle()
+    val goodsReceiptState by goodsReceiptViewModel.state.collectAsStateWithLifecycle()
+    val goodsReceiptSearchResults by goodsReceiptViewModel.searchResults.collectAsStateWithLifecycle()
     val recommendations by viewModel.recommendations.collectAsStateWithLifecycle()
+    val intelligenceSnapshot by viewModel.intelligenceSnapshot.collectAsStateWithLifecycle()
+    val attentionItems by viewModel.attentionItems.collectAsStateWithLifecycle()
+    val attentionInitialized by viewModel.attentionInitialized.collectAsStateWithLifecycle()
     val businessContext = businessProfile?.let { DefaultBusinessContextResolver().resolve(it) }
     val activeCapabilities = businessContext?.capabilities.orEmpty()
     var screen by remember { mutableStateOf(TinoScreen.Splash) }
-    var splashAnimationFinished by remember { mutableStateOf(false) }
     var saleLines by remember { mutableStateOf<List<SaleLine>>(emptyList()) }
     var selectedCustomer by remember { mutableStateOf<CustomerBalance?>(null) }
     var selectedProduct by remember { mutableStateOf<ProductSummary?>(null) }
@@ -218,13 +341,47 @@ internal fun TinoApp(
     var fiscalUploadUri by remember { mutableStateOf<Uri?>(null) }
     var completion by remember { mutableStateOf(TinoCompletion()) }
     val message by viewModel.message.collectAsStateWithLifecycle()
-    val voiceState by voiceViewModel.state.collectAsStateWithLifecycle()
     val contextualVoiceState by contextualVoiceViewModel.state.collectAsStateWithLifecycle()
     val agenticVoiceState by agenticVoiceViewModel.state.collectAsStateWithLifecycle()
     val sharedAgentSnapshot by agentSessionViewModel.sharedState.snapshot.collectAsStateWithLifecycle()
     val agentPresence by agentSessionViewModel.presence.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var pendingVoiceAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var pendingOtpPrompt by remember { mutableStateOf<PendingOtpPrompt?>(null) }
+
+    val requestOtpCode: suspend (OtpChallenge) -> OtpCodeAttempt = { challenge ->
+        suspendCancellableCoroutine { continuation ->
+            pendingOtpPrompt = PendingOtpPrompt(challenge, continuation)
+            continuation.invokeOnCancellation {
+                if (pendingOtpPrompt?.continuation === continuation) {
+                    pendingOtpPrompt = null
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(goodsReceiptState) {
+        if (screen == TinoScreen.NfeKeyEntry && (
+                goodsReceiptState is GoodsReceiptRemoteState.PreviewReady ||
+                    goodsReceiptState is GoodsReceiptRemoteState.ReviewRequired ||
+                    goodsReceiptState is GoodsReceiptRemoteState.Confirmed
+                )
+        ) {
+            screen = TinoScreen.NfePreview
+        }
+    }
+
+    LaunchedEffect(screen, context) {
+        val activity = context as? Activity ?: return@LaunchedEffect
+        val barColor = TinoPaper.toArgb()
+        activity.window.statusBarColor = barColor
+        activity.window.navigationBarColor = barColor
+        WindowInsetsControllerCompat(activity.window, activity.window.decorView).apply {
+            isAppearanceLightStatusBars = true
+            isAppearanceLightNavigationBars = true
+        }
+    }
+
     val voicePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -246,9 +403,20 @@ internal fun TinoApp(
         }
     }
 
-    LaunchedEffect(profileLoaded, storeProfile, splashAnimationFinished) {
-        if (!profileLoaded || !splashAnimationFinished) return@LaunchedEffect
-        screen = if (storeProfile == null) TinoScreen.FirstAccess else TinoScreen.Home
+    LaunchedEffect(profileLoaded, storeProfile, remoteBusinessId, authenticated, openNotification) {
+        if (!profileLoaded) return@LaunchedEffect
+        screen = when {
+            !authenticated -> TinoScreen.FirstAccess
+            storeProfile == null || remoteBusinessId == null -> TinoScreen.FirstAccess
+            openNotification -> TinoScreen.Notification
+            else -> TinoScreen.Home
+        }
+    }
+    LaunchedEffect(screen) {
+        if (screen == TinoScreen.Splash) return@LaunchedEffect
+        withFrameNanos { }
+        withFrameNanos { }
+        onReady()
     }
     LaunchedEffect(agenticVoiceState, activeCapabilities) {
         val navigation = agenticVoiceState as? AgenticVoiceState.Navigation ?: return@LaunchedEffect
@@ -266,23 +434,32 @@ internal fun TinoApp(
     LaunchedEffect(selectedCustomer?.id) {
         viewModel.loadCustomerTimeline(selectedCustomer?.id)
     }
+    LaunchedEffect(screen, selectedCustomer?.id, selectedProduct?.id) {
+        if (screen == TinoScreen.Splash ||
+            screen == TinoScreen.FirstAccess ||
+            screen == TinoScreen.RestoreStore
+        ) {
+            return@LaunchedEffect
+        }
+        viewModel.refreshIntelligenceSnapshot(
+            screen = screen.name,
+            entityProductId = selectedProduct?.id?.takeIf {
+                screen == TinoScreen.ProductDetail || screen == TinoScreen.AdjustStock
+            },
+            entityCustomerId = selectedCustomer?.id?.takeIf {
+                screen == TinoScreen.CustomerDetail ||
+                    screen == TinoScreen.CustomerAccount ||
+                    screen == TinoScreen.ReceivePayment
+            },
+        )
+    }
     LaunchedEffect(screen, selectedCustomer?.id, selectedProduct?.id, activeCapabilities) {
         agentSessionViewModel.enterScreen(
-            ScreenAgentContext(
-                screen = screen.name,
-                activeCustomerId = selectedCustomer?.id,
-                activeProductId = selectedProduct?.id,
-                primaryEntity = when (screen) {
-                    TinoScreen.CustomerDetail,
-                    TinoScreen.CustomerAccount,
-                    TinoScreen.ReceivePayment,
-                    -> selectedCustomer?.let { EntityReference(LanguageEntityType.CUSTOMER, it.name) }
-                    TinoScreen.ProductDetail,
-                    TinoScreen.AdjustStock,
-                    -> selectedProduct?.let { EntityReference(LanguageEntityType.PRODUCT, it.name) }
-                    else -> null
-                },
-                availableCapabilities = activeCapabilities,
+            tinoScreenAgentContext(
+                screen = screen,
+                selectedCustomer = selectedCustomer,
+                selectedProduct = selectedProduct,
+                activeCapabilities = activeCapabilities,
             ),
         )
     }
@@ -300,15 +477,46 @@ internal fun TinoApp(
             ?.let { selectedCustomer = it }
     }
 
+    val reduceMotion = LocalTinoReduceMotion.current
+    val rootPhase = when (screen) {
+        TinoScreen.Splash -> "boot"
+        TinoScreen.FirstAccess -> "first"
+        TinoScreen.RestoreStore -> "restore"
+        else -> "app"
+    }
     Surface(Modifier.fillMaxSize(), color = TinoPaper) {
-        when (screen) {
-            TinoScreen.Splash -> TinoSplashScreen(
-                onFinished = { splashAnimationFinished = true },
-            )
-            TinoScreen.FirstAccess -> FirstAccessScreen(
-                onContinue = { storeName, ownerName, phone, vertical, modules ->
-                    viewModel.saveStoreProfile(storeName, ownerName, phone, vertical, modules)
-                    screen = TinoScreen.Home
+        AnimatedContent(
+            targetState = rootPhase,
+            modifier = Modifier.fillMaxSize(),
+            transitionSpec = {
+                if (initialState == "boot" || targetState == "boot") {
+                    ContentTransform(EnterTransition.None, ExitTransition.None, sizeTransform = null)
+                } else {
+                    tinoScreenContentTransform(
+                        reduceMotion = reduceMotion,
+                        fromLayer = if (initialState == "app") 1 else 0,
+                        toLayer = if (targetState == "app") 1 else 0,
+                    )
+                }
+            },
+            label = "tino-root-phase",
+        ) { phase ->
+        when (phase) {
+            "boot" -> BootLoadingScreen()
+            "first" -> FirstAccessScreen(
+                onContinue = { storeName, ownerName, phone, vertical, modules, dataSource ->
+                    (context as? Activity)?.let { activity ->
+                        viewModel.completeOnboarding(
+                            activity,
+                            storeName,
+                            ownerName,
+                            phone,
+                            vertical,
+                            modules,
+                            dataSource,
+                            requestOtpCode,
+                        )
+                    }
                 },
                 onRestore = { screen = TinoScreen.RestoreStore },
                 contextualVoiceState = contextualVoiceState,
@@ -316,9 +524,16 @@ internal fun TinoApp(
                     requestVoiceAccess { contextualVoiceViewModel.listen(VoiceContext.ONBOARDING) }
                 },
                 onVoiceStop = contextualVoiceViewModel::stop,
+                onboardingState = onboardingState,
             )
-            TinoScreen.RestoreStore -> RestoreStoreScreen(
+            "restore" -> RestoreStoreScreen(
                 onBack = { screen = TinoScreen.FirstAccess },
+                onContinue = { phone ->
+                    (context as? Activity)?.let { activity ->
+                        viewModel.reauthenticateExistingBusiness(activity, phone, requestOtpCode)
+                    }
+                },
+                onboardingState = onboardingState,
             )
             else -> MainShell(
                 screen = screen,
@@ -338,8 +553,12 @@ internal fun TinoApp(
                 message = message,
                 onClearMessage = viewModel::clearMessage,
                 products = products,
+                catalogSyncState = catalogSyncState,
+                catalogDiagnostics = catalogDiagnostics,
+                onSyncCatalog = viewModel::syncCatalog,
                 customers = customers,
                 customerTimeline = customerTimeline,
+                customerLedgerStatement = customerLedgerStatement,
                 todayTotalCents = todayTotal,
                 todayReceivedCents = todayReceived,
                 todayCashCents = todayCash,
@@ -348,21 +567,14 @@ internal fun TinoApp(
                 todaySales = todaySales,
                 pendingSyncCount = pendingSyncCount,
                 suppliers = suppliers,
+                supplierPurchases = supplierPurchases,
                 orders = orders,
                 orderDetail = orderDetail,
                 storeProfile = storeProfile,
-                voiceState = voiceState,
                 contextualVoiceState = contextualVoiceState,
                 agenticVoiceState = agenticVoiceState,
                 sharedAgentSnapshot = sharedAgentSnapshot,
                 agentPresence = agentPresence,
-                onVoiceStart = { requestVoiceAccess(voiceViewModel::start) },
-                onVoiceClarificationRetry = { requestVoiceAccess(voiceViewModel::retryClarification) },
-                onVoiceConfirmByVoice = { requestVoiceAccess(voiceViewModel::confirmByVoice) },
-                onVoiceStop = voiceViewModel::stop,
-                onVoiceSubmitText = voiceViewModel::submitText,
-                onVoiceConfirm = voiceViewModel::confirm,
-                onVoiceCancel = voiceViewModel::cancel,
                 onContextualVoiceStart = { voiceContext ->
                     requestVoiceAccess { contextualVoiceViewModel.listen(voiceContext) }
                 },
@@ -379,7 +591,9 @@ internal fun TinoApp(
                 onAgenticTranscriptEditCancel = agenticVoiceViewModel::cancelTranscriptEdit,
                 onAgenticTranscriptContinue = agenticVoiceViewModel::continueSpeaking,
                 onAgenticTranscriptSubmit = agenticVoiceViewModel::submitTranscriptReview,
-                onAgenticCapabilitySubmit = { capability, label -> agenticVoiceViewModel.submitCapability(capability, label) },
+                onAgenticCapabilitySubmit = { capability, label, subjectId ->
+                    agenticVoiceViewModel.submitCapability(capability, label, subjectId)
+                },
                 onAgenticCapabilityUseOnce = agenticVoiceViewModel::useCapabilityOnce,
                 onAgenticCapabilityActivate = { capability ->
                     businessProfile?.let { profile ->
@@ -390,17 +604,25 @@ internal fun TinoApp(
                 },
                 businessProfile = businessProfile,
                 recommendations = recommendations,
+                intelligenceSnapshot = intelligenceSnapshot,
+                attentionItems = attentionItems,
+                attentionInitialized = attentionInitialized,
+                onDismissAttention = viewModel::dismissAttention,
+                onSnoozeAttention = viewModel::snoozeAttention,
+                onActionAttention = viewModel::actionAttention,
                 onRecommendationDecision = viewModel::decideRecommendation,
                 activeCapabilities = activeCapabilities,
                 onUpdateBusinessProfile = viewModel::updateBusinessProfileAndWait,
                 onAddProduct = viewModel::addProductAndWait,
                 onSell = { product, quantity, paymentMethod -> viewModel.sellAndWait(product, quantity, paymentMethod) },
-                onAddCustomer = viewModel::addCustomer,
-                onUpdateCustomer = viewModel::updateCustomer,
+                onAddCustomer = viewModel::addCustomerAndWait,
+                onUpdateCustomer = viewModel::updateCustomerAndWait,
                 onCreditSale = viewModel::sellOnCreditAndWait,
                 onReceivePayment = viewModel::receivePaymentAndWait,
                 onReceiveStock = viewModel::receiveStockAndWait,
                 onAddSupplier = viewModel::addSupplierAndWait,
+                onCreateSupplierOrder = viewModel::createSupplierOrderAndWait,
+                onReceiveSupplierOrder = viewModel::receiveSupplierOrderAndWait,
                 onCreateOrder = viewModel::createOrderAndWait,
                 onOpenOrder = { orderId ->
                     viewModel.openOrder(orderId)
@@ -416,9 +638,111 @@ internal fun TinoApp(
                     fiscalUploadUri = uri
                     screen = TinoScreen.DocumentUpload
                 },
+                onNfceDocumentCaptured = nfcePreviewViewModel::createPreview,
+                onNfcePreviewConfirmed = nfcePreviewViewModel::confirmPreview,
+                onLoadPurchaseHistory = nfcePreviewViewModel::getPurchaseHistory,
+                onLoadPurchaseHistoryDetail = nfcePreviewViewModel::getPurchaseHistoryDetail,
+                onLoadPurchaseInsights = nfcePreviewViewModel::getPurchaseInsights,
+                goodsReceiptState = goodsReceiptState,
+                goodsReceiptSearchResults = goodsReceiptSearchResults,
+                onSubmitNfeKey = goodsReceiptViewModel::submitAccessKey,
+                onRetryNfe = goodsReceiptViewModel::retry,
+                onSearchNfeProducts = goodsReceiptViewModel::searchProducts,
+                onConfirmNfe = goodsReceiptViewModel::confirm,
             )
         }
+        }
     }
+
+    pendingOtpPrompt?.let { prompt ->
+        OtpCodeDialog(
+            challenge = prompt.challenge,
+            onSubmit = { code ->
+                prompt.continuation.resume(OtpCodeAttempt.Submit(code))
+                pendingOtpPrompt = null
+            },
+            onCancel = {
+                prompt.continuation.cancel()
+                pendingOtpPrompt = null
+            },
+            onResend = {
+                prompt.continuation.resume(OtpCodeAttempt.Resend)
+                pendingOtpPrompt = null
+            },
+        )
+    }
+}
+
+private data class PendingOtpPrompt(
+    val challenge: OtpChallenge,
+    val continuation: CancellableContinuation<OtpCodeAttempt>,
+)
+
+@Composable
+private fun OtpCodeDialog(
+    challenge: OtpChallenge,
+    onSubmit: (String) -> Unit,
+    onCancel: () -> Unit,
+    onResend: () -> Unit,
+) {
+    var code by remember { mutableStateOf("") }
+    var resendInSeconds by remember(challenge.challengeId) {
+        mutableStateOf(challenge.resendAvailableInSeconds)
+    }
+    var expiresInSeconds by remember(challenge.challengeId) {
+        mutableStateOf(challenge.expiresInSeconds)
+    }
+    LaunchedEffect(challenge.challengeId) {
+        while (expiresInSeconds > 0) {
+            delay(1_000)
+            expiresInSeconds -= 1
+            if (resendInSeconds > 0) resendInSeconds -= 1
+        }
+    }
+    val expired = expiresInSeconds <= 0L
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Confirme seu celular") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
+                Text(
+                    if (expired) {
+                        "Este código expirou. Solicite um novo código para continuar."
+                    } else {
+                        "Enviamos um código por ${challenge.deliveryChannel.lowercase()}. " +
+                            "Ele expira em ${expiresInSeconds / 60} min ${expiresInSeconds % 60}s."
+                    },
+                    color = TinoMuted,
+                )
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { value ->
+                        code = value.filter(Char::isDigit).take(6)
+                    },
+                    label = { Text("Código de 6 dígitos") },
+                    singleLine = true,
+                    enabled = !expired,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSubmit(code) },
+                enabled = code.length == 6 && !expired,
+            ) {
+                Text("CONFIRMAR")
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onResend, enabled = resendInSeconds <= 0L) {
+                    Text(if (resendInSeconds > 0L) "REENVIAR (${resendInSeconds}s)" else "REENVIAR")
+                }
+                TextButton(onClick = onCancel) { Text("CANCELAR") }
+            }
+        },
+    )
 }
 
 @Composable
@@ -438,17 +762,42 @@ internal fun GlobalAgentSurface(
     onCapabilityUseOnce: () -> Unit = {},
     onCapabilityActivate: (TinoCapabilityId) -> Unit = {},
 ) {
+    if (state.presentsBottomRiseCatalog()) {
+        TinoAgentCatalogSurface(
+            state = state,
+            onDismiss = onCancel,
+            onStart = onStart,
+            onActionConfirm = onActionConfirm,
+            onUndo = onUndo,
+            onEntityChoiceSelected = onEntityChoiceSelected,
+            onCapabilityUseOnce = onCapabilityUseOnce,
+            onCapabilityActivate = onCapabilityActivate,
+            onCardAction = {},
+        )
+        return
+    }
+    if (state.isVoiceBackground()) {
+        TinoVoiceBackgroundSurface(
+            state = state,
+            onStop = onStop,
+            onCancel = onCancel,
+            onTranscriptEdit = onTranscriptEdit,
+            onTranscriptChange = onTranscriptChange,
+            onTranscriptEditCancel = onTranscriptEditCancel,
+            onTranscriptContinue = onTranscriptContinue,
+            onTranscriptSubmit = onTranscriptSubmit,
+        )
+        return
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = TinoSpacing.md, vertical = TinoSpacing.sm),
         contentAlignment = Alignment.BottomCenter,
     ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = TinoShapes.large,
-            colors = CardDefaults.cardColors(containerColor = TinoPaper),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        TinoCardSurface(
+            modifier = Modifier,
+            description = "Resposta do TINO",
         ) {
             Column(
                 Modifier.padding(TinoSpacing.sm),
@@ -509,30 +858,67 @@ internal fun ContextualVoicePanel(
     onStop: () -> Unit,
 ) {
     val current = state.forContext(context)
-    val message = when (current) {
-        is ContextualVoiceState.NeedsCorrection -> current.message
-        is ContextualVoiceState.Unavailable -> current.message
-        is ContextualVoiceState.Error -> current.message
-        else -> ""
-    }
-    if (message.isNotBlank()) {
-        Text(
-            message,
-            modifier = Modifier.fillMaxWidth(),
-            color = TinoRed,
-            style = MaterialTheme.typography.bodySmall,
-            textAlign = TextAlign.End,
+    when (current) {
+        ContextualVoiceState.Idle -> TinoVoiceCard(
+            title = "Preencher falando",
+            message = hint,
+            onClick = onStart,
+        )
+        is ContextualVoiceState.Listening -> TinoVoiceCard(
+            title = "Estou ouvindo…",
+            message = current.transcript.ifBlank { "Fale naturalmente. Toque aqui para parar." },
+            showForward = false,
+            emphasized = true,
+            onClick = onStop,
+        )
+        is ContextualVoiceState.Understanding -> TinoCardSurface(description = "Processando fala") {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(TinoSpacing.sm),
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(TinoSize.iconNormal),
+                    color = TinoGreen,
+                    strokeWidth = TinoSize.progressStrokeWidth,
+                )
+                Column(Modifier.weight(1f)) {
+                    Text("Organizando sua fala…", fontWeight = FontWeight.SemiBold)
+                    Text(current.transcript, color = TinoMuted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        is ContextualVoiceState.Extracted -> TinoCardSurface(description = "Dados preenchidos") {
+            Text("Pronto — preenchi os dados da sua fala.", color = TinoGreenDark, fontWeight = FontWeight.SemiBold)
+        }
+        is ContextualVoiceState.NeedsCorrection -> TinoVoiceCard(
+            title = "Falta só confirmar",
+            message = current.message,
+            showForward = true,
+            emphasized = true,
+            onClick = onStart,
+        )
+        is ContextualVoiceState.Unavailable -> TinoVoiceCard(
+            title = "Voz indisponível",
+            message = current.message,
+            onClick = onStart,
+        )
+        is ContextualVoiceState.Error -> TinoVoiceCard(
+            title = "Não consegui ouvir",
+            message = current.message,
+            onClick = onStart,
         )
     }
 }
 
 @Composable
 internal fun FirstAccessScreen(
-    onContinue: (String, String, String, BusinessVertical, Set<BusinessModule>) -> Unit,
+    onContinue: (String, String, String, BusinessVertical, Set<BusinessModule>, OnboardingDataSourceChoice) -> Unit,
     onRestore: () -> Unit,
     contextualVoiceState: ContextualVoiceState = ContextualVoiceState.Idle,
     onVoiceStart: () -> Unit = {},
     onVoiceStop: () -> Unit = {},
+    onboardingState: OnboardingState = OnboardingState.Idle,
 ) {
     var store by remember { mutableStateOf("") }
     var owner by remember { mutableStateOf("") }
@@ -542,6 +928,7 @@ internal fun FirstAccessScreen(
     var vertical by remember { mutableStateOf(BusinessVertical.RETAIL) }
     var modules by remember { mutableStateOf(VerticalPresetCatalog.forVertical(vertical).defaultModules) }
     var customizeModules by remember { mutableStateOf(false) }
+    var dataSourceChoice by remember { mutableStateOf(OnboardingDataSourceChoice.Native) }
     val missingFields = buildList {
         if (store.isBlank()) add("nome do comércio")
         if (owner.isBlank()) add("seu nome")
@@ -627,9 +1014,40 @@ internal fun FirstAccessScreen(
                 }
             }
         }
-        TextButton(onClick = { customizeModules = !customizeModules }) {
-            Text(if (customizeModules) "Ocultar recursos" else "Personalizar recursos")
+        Spacer(Modifier.height(TinoSpacing.md))
+        Text(
+            "Você já usa um sistema?",
+            modifier = Modifier.fillMaxWidth(),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        OnboardingChoiceRow(
+            label = "Não, começar no TINO",
+            selected = dataSourceChoice.sourceType == BusinessDataSourceType.TINO_NATIVE,
+            onClick = { dataSourceChoice = OnboardingDataSourceChoice.Native },
+        )
+        OnboardingChoiceRow(
+            label = "Sim, conectar meu sistema",
+            selected = dataSourceChoice.sourceType == BusinessDataSourceType.EXTERNAL_API,
+            onClick = { dataSourceChoice = OnboardingDataSourceChoice.DocesSonhos },
+        )
+        if (dataSourceChoice.sourceType == BusinessDataSourceType.EXTERNAL_API) {
+            Spacer(Modifier.height(TinoSpacing.sm))
+            Text(
+                "Conectar sistema",
+                modifier = Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            OnboardingChoiceRow(
+                label = "Doces & Sonhos",
+                selected = true,
+                onClick = {},
+            )
         }
+        TinoTextAction(
+            label = if (customizeModules) "Ocultar recursos" else "Personalizar recursos",
+            onClick = { customizeModules = !customizeModules },
+            modifier = Modifier.fillMaxWidth(),
+        )
         Text(
             "Ativamos: ${modules.filter { it != BusinessModule.CORE }.joinToString { it.displayName() }}",
             color = TinoMuted,
@@ -668,8 +1086,23 @@ internal fun FirstAccessScreen(
                 Text(message, color = TinoMuted)
             }
         }
+        when (onboardingState) {
+            OnboardingState.Authenticating -> Text("Conectando sua conta com o TINO…", color = TinoMuted)
+            is OnboardingState.AwaitingOtp -> Text("Digite o código enviado para confirmar seu celular.", color = TinoMuted)
+            OnboardingState.LoadingBusiness -> Text("Criando o comércio no TINO…", color = TinoMuted)
+            OnboardingState.RegisteringInstallation -> Text("Registrando este aparelho…", color = TinoMuted)
+            is OnboardingState.Error -> TinoCard {
+                Text("Não foi possível concluir o cadastro", color = TinoRed, fontWeight = FontWeight.SemiBold)
+                Text(onboardingState.message, color = TinoMuted)
+            }
+            else -> Unit
+        }
         Spacer(Modifier.height(TinoSpacing.lg))
-        TinoPrimaryButton("CONTINUAR") {
+        val onboardingWorking = onboardingState == OnboardingState.Authenticating ||
+            onboardingState is OnboardingState.AwaitingOtp ||
+            onboardingState == OnboardingState.LoadingBusiness ||
+            onboardingState == OnboardingState.RegisteringInstallation
+        TinoPrimaryButton("CONTINUAR", {
             submitAttempted = true
             if (missingFields.isEmpty()) {
                 runCatching {
@@ -679,12 +1112,12 @@ internal fun FirstAccessScreen(
                         operationalPatterns = OperationalPatternCatalog.forVertical(vertical),
                     )
                 }.onSuccess {
-                    onContinue(store, owner, phone, vertical, modules + BusinessModule.CORE)
+                    onContinue(store, owner, phone, vertical, modules + BusinessModule.CORE, dataSourceChoice)
                 }.onFailure {
                     configurationError = profileConfigurationError(it)
                 }
             }
-        }
+        }, Modifier, enabled = !onboardingWorking, loading = onboardingWorking)
         if (submitAttempted && missingFields.isNotEmpty()) {
             Text(
                 "Preencha: ${missingFields.joinToString(", ")}.",
@@ -693,12 +1126,29 @@ internal fun FirstAccessScreen(
                 textAlign = TextAlign.Center,
             )
         }
-        TextButton(
+        TinoTextAction(
+            label = "Já tenho um comércio",
             onClick = onRestore,
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Já tenho um comércio", style = MaterialTheme.typography.labelMedium)
-        }
+            color = TinoGreenDark,
+        )
+    }
+}
+
+@Composable
+private fun OnboardingChoiceRow(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Text(label, color = TinoInk)
     }
 }
 
@@ -723,21 +1173,76 @@ private fun BusinessModule.displayName(): String = when (this) {
 }
 
 @Composable
-internal fun RestoreStoreScreen(onBack: () -> Unit) {
+internal fun RestoreStoreScreen(
+    onBack: () -> Unit,
+    onContinue: (String) -> Unit = {},
+    onboardingState: OnboardingState = OnboardingState.Idle,
+) {
+    var phone by remember { mutableStateOf("") }
+    var submitAttempted by remember { mutableStateOf(false) }
+    val phoneDigits = phone.filter(Char::isDigit)
+    val onboardingWorking = onboardingState == OnboardingState.Authenticating ||
+        onboardingState is OnboardingState.AwaitingOtp ||
+        onboardingState == OnboardingState.LoadingBusiness ||
+        onboardingState == OnboardingState.RegisteringInstallation
     ScreenColumn {
-        TinoTopBar("Recuperar meu comércio", onBack)
-        TinoEmptyState(
-            TinoIcons.Store,
-            "Nenhum backup encontrado",
-            "A recuperação ficará disponível quando houver um backup vinculado a este comércio.",
+        TinoTopBar("Entrar no meu comércio", onBack)
+        TinoCard {
+            Text("Acesso ao comércio existente", style = MaterialTheme.typography.titleMedium)
+            Text("Confirme seu celular para localizar o comércio autorizado no TINO.", color = TinoMuted)
+        }
+        TinoTextField(
+            value = phone,
+            onValueChange = { phone = it },
+            label = "Celular",
+            placeholder = "(86) 9 1234-5678",
+            labelAbove = true,
         )
+        when (onboardingState) {
+            OnboardingState.Authenticating -> Text("Conectando sua conta com o TINO…", color = TinoMuted)
+            is OnboardingState.AwaitingOtp -> Text("Digite o código enviado para confirmar seu celular.", color = TinoMuted)
+            OnboardingState.RegisteringInstallation -> Text("Vinculando este aparelho ao comércio…", color = TinoMuted)
+            is OnboardingState.Error -> TinoCard {
+                Text("Não foi possível entrar no comércio", color = TinoRed, fontWeight = FontWeight.SemiBold)
+                Text(onboardingState.message, color = TinoMuted)
+            }
+            else -> Unit
+        }
+        TinoPrimaryButton(
+            "CONTINUAR",
+            {
+                submitAttempted = true
+                if (phoneDigits.length in 10..13) onContinue(phone)
+            },
+            Modifier,
+            enabled = !onboardingWorking,
+            loading = onboardingWorking,
+        )
+        if (submitAttempted && phoneDigits.length !in 10..13) {
+            Text("Informe um celular válido.", color = TinoRed)
+        }
         TinoSecondaryButton("VOLTAR") { onBack() }
     }
 }
 
 @Composable
+private fun BootLoadingScreen() {
+    Box(
+        Modifier.fillMaxSize().padding(TinoSpacing.screen),
+        contentAlignment = Alignment.Center,
+    ) {
+        TinoLoadingState(
+            icon = TinoIcons.Store,
+            title = "Preparando o TINO",
+            message = "Carregando seus dados locais.",
+            illustrationState = TinoIllustrationState.LOADING,
+        )
+    }
+}
+
+@Composable
 internal fun VoiceStageDiagnostics(metrics: AgenticVoiceMetrics) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(TinoSpacing.xxs)) {
         Text(
             "MIC → 1ª parcial ${metrics.firstPartialMs.durationText()} · " +
                 "1ª → última ${metrics.firstToLastPartialMs.durationText()}",
@@ -775,224 +1280,123 @@ internal fun VoiceStageDiagnostics(metrics: AgenticVoiceMetrics) {
 internal fun Long?.durationText(): String = this?.let { "${it}ms" } ?: "—"
 
 @Composable
-internal fun VoiceScreen(
-    onNavigate: (TinoScreen) -> Unit,
-    state: VoiceUiState = VoiceUiState.Idle,
-    onStart: () -> Unit = {},
-    onClarificationRetry: () -> Unit = onStart,
-    onConfirmByVoice: () -> Unit = onStart,
-    onStop: () -> Unit = {},
-    onSubmitText: (String) -> Unit = {},
-    onConfirm: () -> Unit = {},
-    onCancel: () -> Unit = {},
-) {
-    var typing by remember { mutableStateOf(false) }
-    var typedText by remember { mutableStateOf("") }
-    ScreenColumn(horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TinoIconButton(TinoIcons.Close, "Fechar", { onNavigate(TinoScreen.Home) })
-            Text("FALAR COM O TINO", modifier = Modifier.weight(1f), textAlign = TextAlign.Center, color = TinoGreenDark, style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.size(TinoSize.iconButton))
-        }
-        Spacer(Modifier.height(TinoSpacing.lg))
-        Box(Modifier.size(180.dp), contentAlignment = Alignment.Center) {
-            Box(Modifier.size(180.dp).background(TinoGreenTint, CircleShape), contentAlignment = Alignment.Center) {
-                Box(Modifier.size(132.dp).background(TinoGreenLight, CircleShape), contentAlignment = Alignment.Center) {
-                    Box(Modifier.size(88.dp).background(TinoGreen, CircleShape), contentAlignment = Alignment.Center) {
-                    Icon(TinoIcons.Voice, contentDescription = "Voz do TINO", tint = TinoSurface, modifier = Modifier.size(TinoSize.iconLarge))
-                    }
-                }
-            }
-        }
-        if (state is VoiceUiState.Listening || state is VoiceUiState.Transcript) {
-            Text("Estou ouvindo...", color = TinoGreenDark, style = MaterialTheme.typography.titleLarge)
-            Text("Diga o que você precisa.", color = TinoMuted, style = MaterialTheme.typography.bodyLarge)
-        }
-        when (state) {
-            VoiceUiState.Idle -> {
-                TinoPrimaryButton("COMEÇAR A FALAR", onStart)
-            }
-            VoiceUiState.Cancelled -> {
-                TinoEmptyState(TinoIcons.Success, "Operação cancelada", "Nada foi alterado.")
-                TinoPrimaryButton("FALAR COM O TINO", onStart)
-                TinoSecondaryButton("VOLTAR") { onNavigate(TinoScreen.Home) }
-            }
-            VoiceUiState.Listening -> {
-                Text("Ouvindo...", style = MaterialTheme.typography.titleMedium)
-                Text("Fale naturalmente. Nada será salvo sem revisão.", textAlign = TextAlign.Center, color = TinoMuted)
-                Spacer(Modifier.height(TinoSpacing.xl))
-                TinoSecondaryButton("CONCLUIR E ENTENDER", onStop)
-            }
-            is VoiceUiState.Transcript -> {
-                TinoCard {
-                    Text(if (state.committed) "Fala confirmada" else "Estou ouvindo", style = MaterialTheme.typography.titleMedium)
-                    Text(state.text.ifBlank { "Aguardando fala..." }, color = TinoInk)
-                }
-                TinoSecondaryButton("CANCELAR") { onCancel(); onNavigate(TinoScreen.Home) }
-            }
-            is VoiceUiState.Understanding -> {
-                TinoCard {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(TinoSpacing.md),
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(TinoSize.iconNormal),
-                            color = TinoGreen,
-                            strokeWidth = 3.dp,
-                        )
-                        Column(Modifier.weight(1f)) {
-                            Text("ORGANIZANDO SUA FALA...", style = MaterialTheme.typography.titleMedium)
-                            Text("Já recebi sua frase. Vou preparar a ação.", color = TinoMuted)
-                        }
-                    }
-                    if (state.text.isNotBlank()) Text(state.text, color = TinoInk)
-                }
-                TinoSecondaryButton("CANCELAR", onCancel)
-            }
-            is VoiceUiState.Preview -> {
-                TinoCard {
-                    Text(state.preview.title, style = MaterialTheme.typography.titleMedium)
-                    Text(state.preview.detail, color = TinoMuted)
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
-                    TinoSecondaryButton("CANCELAR", onCancel, Modifier.weight(1f))
-                    TinoPrimaryButton(state.preview.confirmLabel, onConfirm, Modifier.weight(1f))
-                }
-                TinoSecondaryButton("CONFIRMAR FALANDO", onConfirmByVoice)
-            }
-            is VoiceUiState.Answer -> {
-                TinoCard {
-                    Text(state.title, style = MaterialTheme.typography.titleMedium)
-                    Text(state.message, color = TinoInk, style = MaterialTheme.typography.bodyLarge)
-                    Text("Consulta feita nos dados deste aparelho.", color = TinoMuted)
-                }
-                TinoPrimaryButton("VOLTAR PARA O TINO") { onNavigate(TinoScreen.Home) }
-            }
-            is VoiceUiState.Clarification -> {
-                TinoCard {
-                    Text("PRECISO DE UM DETALHE", style = MaterialTheme.typography.titleMedium)
-                    Text(state.message, color = TinoInk, style = MaterialTheme.typography.bodyLarge)
-                    Text("A operação ainda não foi alterada. Diga o nome completo para continuar.", color = TinoMuted)
-                }
-                state.entityChoice?.let { choice ->
-                    TinoA2UiRenderer(
-                        message = choice,
-                        onEntityChoiceSelected = onSubmitText,
-                    )
-                }
-                TinoPrimaryButton("DIZER O NOME COMPLETO", onClarificationRetry)
-                TinoSecondaryButton("FAZER MANUALMENTE") { onNavigate(TinoScreen.QuickSale) }
-            }
-            is VoiceUiState.ConfirmationNeeded -> {
-                TinoCard {
-                    Text("CONFIRME A OPERAÇÃO", style = MaterialTheme.typography.titleMedium)
-                    Text(state.message, color = TinoInk, style = MaterialTheme.typography.bodyLarge)
-                    Text("Nada foi alterado ainda.", color = TinoMuted)
-                }
-                TinoPrimaryButton("CONFIRMAR FALANDO", onConfirmByVoice)
-                TinoSecondaryButton("CANCELAR", onCancel)
-            }
-            is VoiceUiState.Unavailable -> {
-                TinoEmptyState(TinoIcons.Error, "Voz indisponível", state.message)
-                TinoPrimaryButton("ABRIR VENDA MANUAL") { onNavigate(TinoScreen.QuickSale) }
-                TinoSecondaryButton("VOLTAR") { onNavigate(TinoScreen.Home) }
-            }
-            is VoiceUiState.Error -> {
-                TinoEmptyState(TinoIcons.Error, "Não foi possível entender", state.message)
-                TinoPrimaryButton("TENTAR DE NOVO", onStart)
-                TinoSecondaryButton("FAZER MANUALMENTE") { onNavigate(TinoScreen.QuickSale) }
-            }
-            is VoiceUiState.Completed -> {
-                TinoEmptyState(TinoIcons.Success, "Comando concluído", state.message)
-                TinoPrimaryButton("VOLTAR PARA O TINO") { onNavigate(TinoScreen.Home) }
-            }
-        }
-        if (state == VoiceUiState.Idle || state == VoiceUiState.Listening || state is VoiceUiState.Transcript) {
-            if (typing) {
-                TinoTextField(
-                    value = typedText,
-                    onValueChange = { typedText = it },
-                    label = "Digite o que você precisa",
-                    placeholder = "Ex.: Quanto entrou hoje?",
-                    labelAbove = true,
-                )
-                TinoPrimaryButton("ENVIAR", {
-                    onSubmitText(typedText)
-                    typing = false
-                }, Modifier, enabled = typedText.isNotBlank())
-                TinoSecondaryButton("VOLTAR PARA A VOZ") { typing = false }
-            } else {
-                TinoSecondaryButton("DIGITAR EM VEZ DE FALAR") { typing = true }
-            }
-        }
-        if (state == VoiceUiState.Idle || state == VoiceUiState.Listening) {
-            TinoCard {
-                Text("Exemplos do que você pode dizer", color = TinoGreenDark, style = MaterialTheme.typography.titleMedium)
-                Text("\"João levou 70 reais fiado\"", color = TinoMuted)
-                Text("\"João pagou 50 no PIX\"", color = TinoMuted)
-                Text("\"Quanto entrou hoje?\"", color = TinoMuted)
-                Text("\"Chegaram 2 caixas de café\"", color = TinoMuted)
-            }
-        }
-    }
-}
-
-@Composable
 internal fun ProductsScreen(
     products: List<ProductSummary>,
     onNavigate: (TinoScreen) -> Unit,
     onSelectProduct: (ProductSummary) -> Unit,
+    catalogSyncState: CatalogSyncState? = null,
+    onSyncCatalog: () -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf("Todos") }
     val searched = products.filter { it.name.contains(query, ignoreCase = true) }
     val shown = when (filter) {
-        "Estoque baixo" -> searched.filter { it.stockQuantity in 1..6 }
-        "Sem estoque" -> searched.filter { it.stockQuantity == 0 }
+        "Estoque baixo" -> searched.filter { it.stockTracked && it.stockQuantity in 1..6 }
+        "Sem estoque" -> searched.filter { it.stockTracked && it.stockQuantity == 0 }
         else -> searched
     }
-    ScreenColumn {
-        TinoTopBar("Estoque") { onNavigate(TinoScreen.Home) }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
-            TinoMetricCard(
-                TinoIcons.Products,
-                products.size.toString(),
-                "produtos",
-                Modifier.weight(1f),
-                TinoGreen,
-                TinoGreenLight,
-            )
-            TinoMetricCard(
-                TinoIcons.Warning,
-                products.count { it.stockQuantity in 0..6 }.toString(),
-                "estoque baixo",
-                Modifier.weight(1f),
-                TinoOrange,
-                TinoAmberContainer,
-            )
+    val syncing = catalogSyncState?.status == CatalogSyncStatus.SYNCING
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(
+                start = TinoSpacing.screen,
+                top = TinoSpacing.lg,
+                end = TinoSpacing.screen,
+                bottom = TinoSpacing.lg,
+            ),
+        verticalArrangement = Arrangement.spacedBy(TinoSpacing.lg),
+    ) {
+        item {
+            TinoTopBar("Estoque") { onNavigate(TinoScreen.Home) }
         }
-        TinoSearchField(query, { query = it }, "Procurar produto")
-        TinoHorizontalCarousel {
-            listOf("Todos", "Estoque baixo", "Sem estoque").forEach { option ->
-                item { TinoFilterChip(option, filter == option) { filter = option } }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
+                TinoMetricCard(
+                    TinoIcons.Products,
+                    products.size.toString(),
+                    "produtos",
+                    Modifier.weight(1f),
+                    TinoGreen,
+                    TinoGreenLight,
+                )
+                TinoMetricCard(
+                    TinoIcons.Warning,
+                    products.count { it.stockTracked && it.stockQuantity in 0..6 }.toString(),
+                    "estoque baixo",
+                    Modifier.weight(1f),
+                    TinoOrange,
+                    TinoAmberContainer,
+                )
             }
         }
-        TinoSectionLabel("Produtos")
+        item {
+            TinoSearchField(query, { query = it }, "Procurar produto")
+        }
+        item {
+            TinoSecondaryButton(if (syncing) "ATUALIZANDO CATÁLOGO…" else "ATUALIZAR CATÁLOGO") {
+                if (!syncing) onSyncCatalog()
+            }
+        }
+        when (catalogSyncState?.status) {
+            CatalogSyncStatus.SYNCING -> item {
+                Text("Buscando catálogo no TINO…", color = TinoMuted)
+            }
+            CatalogSyncStatus.FAILED -> item {
+                Text(catalogSyncState.errorMessage ?: "Catálogo local preservado.", color = TinoOrange)
+            }
+            CatalogSyncStatus.PARTIAL -> item {
+                Text(
+                    "${catalogSyncState.accepted} aplicados · ${catalogSyncState.rejected} rejeitados" +
+                        if (catalogSyncState.possiblyPartial) " · consulta limitada" else "",
+                    color = TinoMuted,
+                )
+            }
+            CatalogSyncStatus.SUCCESS -> item {
+                Text("${catalogSyncState.accepted} itens sincronizados", color = TinoMuted)
+            }
+            else -> Unit
+        }
+        item {
+            TinoHorizontalCarousel {
+                listOf("Todos", "Estoque baixo", "Sem estoque").forEach { option ->
+                    item { TinoFilterChip(option, filter == option) { filter = option } }
+                }
+            }
+        }
+        item {
+            TinoSectionLabel("Catálogo")
+        }
+        item {
+            Text("Visão do estoque", style = MaterialTheme.typography.titleMedium)
+        }
         if (shown.isEmpty()) {
-            TinoEmptyState(
-                TinoIcons.Products,
-                if (products.isEmpty()) "Nenhum produto cadastrado" else "Nenhum produto encontrado",
-                if (products.isEmpty()) "Cadastre o primeiro produto para começar a vender." else "Tente outra busca ou cadastre um novo produto.",
-                actionLabel = "CADASTRAR PRODUTO",
-                onAction = { onNavigate(TinoScreen.NewProduct) },
-            )
+            item {
+                TinoEmptyState(
+                    TinoIcons.Products,
+                    if (products.isEmpty()) "Nenhum produto cadastrado" else "Nenhum produto encontrado",
+                    if (products.isEmpty()) "Cadastre o primeiro produto para começar a vender." else "Tente outra busca ou cadastre um novo produto.",
+                    actionLabel = "CADASTRAR PRODUTO",
+                    onAction = { onNavigate(TinoScreen.NewProduct) },
+                    illustrationState = if (products.isEmpty()) {
+                        TinoIllustrationState.LEARNING
+                    } else {
+                        TinoIllustrationState.NOT_FOUND
+                    },
+                )
+            }
         } else {
-            shown.forEach { product ->
-                TinoProductRow(product) { onSelectProduct(product); onNavigate(TinoScreen.ProductDetail) }
+            items(shown, key = { it.id }) { product ->
+                TinoProductRow(
+                    product = product,
+                    onClick = { onSelectProduct(product); onNavigate(TinoScreen.ProductDetail) },
+                    motionBoundsEnabled = false,
+                )
             }
         }
-        TinoSecondaryButton("ADICIONAR PRODUTO") { onNavigate(TinoScreen.NewProduct) }
+        item {
+            TinoSecondaryButton("ADICIONAR PRODUTO") { onNavigate(TinoScreen.NewProduct) }
+        }
     }
 }
 
@@ -1001,25 +1405,43 @@ internal fun ProductDetailScreen(product: ProductSummary?, onNavigate: (TinoScre
     ScreenColumn {
         if (product == null) {
             TinoTopBar("Produto") { onNavigate(TinoScreen.Products) }
-            TinoEmptyState(TinoIcons.Products, "Produto não selecionado", "Volte à lista e escolha um produto para ver os detalhes.")
-            TinoSecondaryButton("VOLTAR A PRODUTOS") { onNavigate(TinoScreen.Products) }
+            TinoEmptyState(
+                TinoIcons.Products,
+                "Produto não selecionado",
+                "Volte à lista e escolha um produto para ver os detalhes.",
+                illustrationState = TinoIllustrationState.NOT_FOUND,
+            )
         } else {
             TinoTopBar(product.name) { onNavigate(TinoScreen.Products) }
-            TinoCard {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(TinoSpacing.md)) {
-                    Icon(TinoIcons.Products, contentDescription = null, tint = TinoGreen, modifier = Modifier.size(TinoSize.iconLarge))
-                    Column {
-                        MetricLine("Venda", formatCents(product.priceCents.toLong()))
-                    }
-                }
+            TinoCardRenderer(
+                TinoCardSpec.Catalog(
+                    icon = TinoIcons.Products,
+                    title = product.name,
+                    context = "Produto",
+                    primaryText = formatCents(product.priceCents.toLong()),
+                    status = TinoCardStatus.SUCCESS,
+                    modifier = Modifier.tinoSharedBounds(TinoSharedKeys.product(product.id)),
+                ),
+            )
+            if (product.stockTracked) {
+                Text("Estoque", style = MaterialTheme.typography.titleMedium)
+                Text("${product.stockQuantity} unidades", style = MaterialTheme.typography.displaySmall)
+                TinoSystemActionListCard(
+                    title = "Ações",
+                    actions = listOf(
+                        TinoSystemAction(
+                            icon = TinoIcons.Input,
+                            title = "Registrar entrada",
+                            subtitle = "Mercadoria que chegou",
+                            onClick = { onNavigate(TinoScreen.StockEntry) },
+                        ),
+                    ),
+                )
+            } else {
+                Text("Estoque", style = MaterialTheme.typography.titleMedium)
+                Text("Feito sob demanda", style = MaterialTheme.typography.titleLarge, color = TinoGreen)
+                Text("Este produto não possui quantidade em estoque.", color = TinoMuted)
             }
-            Text("Estoque", style = MaterialTheme.typography.titleMedium)
-            Text("${product.stockQuantity} unidades", style = MaterialTheme.typography.displaySmall)
-            TinoCard {
-                Text("Atualizar estoque", style = MaterialTheme.typography.titleMedium)
-                Text("Registre uma entrada de mercadoria para adicionar unidades.", color = TinoMuted)
-            }
-            TinoSecondaryButton("AJUSTAR ESTOQUE") { onNavigate(TinoScreen.AdjustStock) }
         }
     }
 }
@@ -1051,7 +1473,12 @@ internal fun QuickSaleScreen(
                 val requestedQuantity = fields["quantity"]?.toIntOrNull()
                     ?: Regex("\\b([0-9]+)\\b").find(reference)?.groupValues?.get(1)?.toIntOrNull()
                     ?: 1
-                cart = cart + (product.id to requestedQuantity.coerceIn(1, product.stockQuantity.coerceAtLeast(1)))
+                val quantity = if (product.stockTracked) {
+                    requestedQuantity.coerceIn(1, product.stockQuantity.coerceAtLeast(1))
+                } else {
+                    requestedQuantity.coerceAtLeast(1)
+                }
+                cart = cart + (product.id to quantity)
                 query = product.name
             } else {
                 query = reference
@@ -1078,13 +1505,18 @@ internal fun QuickSaleScreen(
                 if (products.isEmpty()) "Cadastre um produto antes de abrir uma venda." else "Tente outra busca.",
                 actionLabel = if (products.isEmpty()) "CADASTRAR PRODUTO" else null,
                 onAction = if (products.isEmpty()) ({ onNavigate(TinoScreen.NewProduct) }) else null,
+                illustrationState = if (products.isEmpty()) {
+                    TinoIllustrationState.LEARNING
+                } else {
+                    TinoIllustrationState.NOT_FOUND
+                },
             )
         } else {
             shown.take(4).forEach { product ->
                 TinoSaleProductRow(
                     product = product,
                     onAdd = { cart = cart + (product.id to ((cart[product.id] ?: 0) + 1)) },
-                    enabled = (cart[product.id] ?: 0) < product.stockQuantity,
+                    enabled = !product.stockTracked || (cart[product.id] ?: 0) < product.stockQuantity,
                 )
             }
         }
@@ -1118,7 +1550,7 @@ internal fun QuickSaleScreen(
                                 }
                             },
                             onIncrease = {
-                                if (line.quantity < line.product.stockQuantity) {
+                                if (!line.product.stockTracked || line.quantity < line.product.stockQuantity) {
                                     cart = cart + (line.product.id to (line.quantity + 1))
                                 }
                             },
@@ -1160,6 +1592,7 @@ internal fun ReceiveSaleScreen(
 ) {
     val scope = rememberCoroutineScope()
     var submitting by remember { mutableStateOf(false) }
+    var submittingMethod by remember { mutableStateOf<PaymentMethod?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var submissionError by remember { mutableStateOf<String?>(null) }
     val total = lines.sumOf { it.quantity * it.product.priceCents }
@@ -1168,6 +1601,7 @@ internal fun ReceiveSaleScreen(
         if (submitting || lines.isEmpty()) return
         scope.launch {
             submitting = true
+            submittingMethod = paymentMethod
             submissionError = null
             var failure: Throwable? = null
             for (line in lines) {
@@ -1176,6 +1610,7 @@ internal fun ReceiveSaleScreen(
                 if (failure != null) break
             }
             submitting = false
+            submittingMethod = null
             if (failure == null) {
                 onComplete(TinoCompletion("Venda registrada", "Pagamento salvo com segurança."))
             } else {
@@ -1187,7 +1622,12 @@ internal fun ReceiveSaleScreen(
     ScreenColumn {
         TinoTopBar("Receber venda") { onNavigate(TinoScreen.QuickSale) }
         if (lines.isEmpty()) {
-            TinoEmptyState(TinoIcons.Cart, "Nenhum item selecionado", "Volte à venda e escolha pelo menos um produto.")
+            TinoEmptyState(
+                TinoIcons.Cart,
+                "Nenhum item selecionado",
+                "Volte à venda e escolha pelo menos um produto.",
+                illustrationState = TinoIllustrationState.EXPLAINING,
+            )
             TinoSecondaryButton("VOLTAR À VENDA") { onNavigate(TinoScreen.QuickSale) }
         } else {
             TinoCard {
@@ -1206,9 +1646,9 @@ internal fun ReceiveSaleScreen(
                 }
             }
             Text("Como recebeu?", style = MaterialTheme.typography.titleMedium)
-            PaymentChoice(TinoIcons.Cash, "Dinheiro", enabled = !submitting) { submit(PaymentMethod.CASH) }
-            PaymentChoice(TinoIcons.Pix, "PIX", enabled = !submitting) { submit(PaymentMethod.PIX) }
-            PaymentChoice(TinoIcons.Card, "Maquininha", enabled = !submitting) { submit(PaymentMethod.CARD) }
+            PaymentChoice(TinoIcons.Cash, "Dinheiro", enabled = !submitting, loading = submittingMethod == PaymentMethod.CASH) { submit(PaymentMethod.CASH) }
+            PaymentChoice(TinoIcons.Pix, "PIX", enabled = !submitting, loading = submittingMethod == PaymentMethod.PIX) { submit(PaymentMethod.PIX) }
+            PaymentChoice(TinoIcons.Card, "Maquininha", enabled = !submitting, loading = submittingMethod == PaymentMethod.CARD) { submit(PaymentMethod.CARD) }
             PaymentChoice(TinoIcons.Credit, "Fiado", enabled = !submitting) { onNavigate(TinoScreen.SelectCustomer) }
         }
     }
@@ -1219,13 +1659,33 @@ internal fun CustomersScreen(
     customers: List<CustomerBalance>,
     onNavigate: (TinoScreen) -> Unit,
     onSelectCustomer: (CustomerBalance) -> Unit,
-    onAddCustomer: (String, String?) -> Unit,
+    onAddCustomer: suspend (String, String?) -> Result<Unit>,
+    contextualVoiceState: ContextualVoiceState = ContextualVoiceState.Idle,
+    onVoiceStart: () -> Unit = {},
+    onVoiceStop: () -> Unit = {},
+    openAddCustomerRequest: Boolean = false,
+    onAddCustomerRequestConsumed: () -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf("Todos") }
     var addVisible by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
+    var submissionError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(contextualVoiceState) {
+        val fields = contextualVoiceState.fieldsFor(VoiceContext.CUSTOMER_CREATE)
+        if (fields.isNotEmpty()) addVisible = true
+        fields["name"]?.takeIf { it.isNotBlank() }?.let { name = it }
+        fields["phone"]?.takeIf { it.isNotBlank() }?.let { phone = it }
+    }
+    LaunchedEffect(openAddCustomerRequest) {
+        if (openAddCustomerRequest) {
+            addVisible = true
+            onAddCustomerRequestConsumed()
+        }
+    }
     val shown = customers
         .filter { it.name.contains(query.trim(), ignoreCase = true) }
         .filter {
@@ -1240,6 +1700,7 @@ internal fun CustomersScreen(
 
     ScreenColumn(verticalSpacing = TinoSpacing.sm) {
         TinoTopBar("Clientes") { onNavigate(TinoScreen.Home) }
+        TinoSectionLabel("Buscar e filtrar")
         TinoSearchField(query, { query = it }, "Procurar por nome")
         TinoHorizontalCarousel {
             listOf("Todos", "Em aberto", "Sem saldo", "Com telefone").forEach { option ->
@@ -1255,6 +1716,11 @@ internal fun CustomersScreen(
                 TinoIcons.People,
                 if (customers.isEmpty()) "Nenhum cliente cadastrado" else "Nenhum cliente encontrado",
                 if (customers.isEmpty()) "Adicione o primeiro cliente para começar." else "Tente outro nome ou tag.",
+                illustrationState = if (customers.isEmpty()) {
+                    TinoIllustrationState.LEARNING
+                } else {
+                    TinoIllustrationState.NOT_FOUND
+                },
             )
         } else {
             shown.forEach { customer ->
@@ -1263,16 +1729,48 @@ internal fun CustomersScreen(
                 }
             }
         }
-        if (addVisible) {
-            TinoTextField(name, { name = it }, "Nome", "Nome do cliente", labelAbove = true)
-            TinoTextField(phone, { phone = it }, "Celular", "Opcional", labelAbove = true)
-            TinoPrimaryButton("SALVAR CLIENTE") {
-                if (name.isNotBlank()) onAddCustomer(name, phone.ifBlank { null })
-                name = ""
-                phone = ""
-                addVisible = false
+        val reduceMotion = LocalTinoReduceMotion.current
+        AnimatedVisibility(visible = addVisible, enter = tinoEnter(reduceMotion), exit = tinoExit(reduceMotion)) {
+            Column(verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
+                TinoTextField(name, { name = it }, "Nome", "Nome do cliente", labelAbove = true)
+                TinoTextField(phone, { phone = it }, "Celular", "Opcional", labelAbove = true)
+                submissionError?.let { errorMessage ->
+                    TinoCard {
+                        Text("Não foi possível cadastrar", color = TinoRed, fontWeight = FontWeight.SemiBold)
+                        Text(errorMessage, color = TinoMuted)
+                    }
+                }
+                ContextualVoicePanel(
+                    context = VoiceContext.CUSTOMER_CREATE,
+                    state = contextualVoiceState,
+                    hint = "Diga o nome e o celular do cliente",
+                    onStart = onVoiceStart,
+                    onStop = onVoiceStop,
+                )
+                TinoPrimaryButton(
+                    "SALVAR CLIENTE",
+                    {
+                        if (!submitting && name.isNotBlank()) scope.launch {
+                            submitting = true
+                            submissionError = null
+                            val failure = onAddCustomer(name, phone.ifBlank { null }).exceptionOrNull()
+                            submitting = false
+                            if (failure == null) {
+                                name = ""
+                                phone = ""
+                                addVisible = false
+                            } else {
+                                submissionError = failure.message ?: "Não foi possível cadastrar o cliente. Tente novamente."
+                            }
+                        }
+                    },
+                    Modifier,
+                    enabled = !submitting && name.isNotBlank(),
+                    loading = submitting,
+                )
             }
-        } else {
+        }
+        AnimatedVisibility(visible = !addVisible, enter = tinoEnter(reduceMotion), exit = tinoExit(reduceMotion)) {
             TinoSecondaryButton("ADICIONAR CLIENTE") { addVisible = true }
         }
     }
@@ -1282,49 +1780,64 @@ internal fun CustomersScreen(
 internal fun CustomerDetailScreen(
     customer: CustomerBalance?,
     onNavigate: (TinoScreen) -> Unit,
-    onUpdateCustomer: (CustomerBalance, String, String?) -> Unit,
+    onUpdateCustomer: suspend (CustomerBalance, String, String?) -> Result<Unit>,
 ) {
     var name by remember(customer?.id) { mutableStateOf(customer?.name.orEmpty()) }
     var phone by remember(customer?.id) { mutableStateOf(customer?.phone.orEmpty()) }
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
+    var submissionError by remember { mutableStateOf<String?>(null) }
     if (customer == null) {
         ScreenColumn {
             TinoTopBar("Cliente") { onNavigate(TinoScreen.Customers) }
-            TinoEmptyState(TinoIcons.People, "Cliente não selecionado", "Volte à lista e escolha um cliente para ver os detalhes.")
+            TinoEmptyState(
+                TinoIcons.People,
+                "Cliente não selecionado",
+                "Volte à lista e escolha um cliente para ver os detalhes.",
+                illustrationState = TinoIllustrationState.NOT_FOUND,
+            )
             TinoSecondaryButton("VOLTAR A CLIENTES") { onNavigate(TinoScreen.Customers) }
         }
         return
     }
     ScreenColumn(verticalSpacing = TinoSpacing.sm) {
         TinoTopBar(customer.name) { onNavigate(TinoScreen.Customers) }
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = TinoShapes.large,
-            colors = CardDefaults.cardColors(containerColor = TinoGreenTint),
-            elevation = CardDefaults.cardElevation(defaultElevation = TinoSize.cardElevation),
-        ) {
-            Row(Modifier.fillMaxWidth().padding(TinoSpacing.md), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(TinoSpacing.md)) {
-                Box(Modifier.size(52.dp).background(TinoGreenLight, CircleShape), contentAlignment = Alignment.Center) {
-                    Icon(TinoIcons.Person, contentDescription = "Cliente", tint = TinoGreen, modifier = Modifier.size(TinoSize.iconLarge))
-                }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(TinoSpacing.xs)) {
-                    Text(customer.name, style = MaterialTheme.typography.titleMedium)
-                    Text(if (customer.balanceCents > 0) "Em aberto na caderneta" else "Sem saldo em aberto", color = TinoMuted, style = MaterialTheme.typography.bodySmall)
-                    Text(
-                        formatCents(customer.balanceCents),
-                        color = if (customer.balanceCents > 0) TinoRed else TinoGreen,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            }
-            TinoSecondaryButton("ABRIR CADERNETA") { onNavigate(TinoScreen.CustomerAccount) }
-        }
+        TinoCardRenderer(
+            TinoCardSpec.Catalog(
+                icon = TinoIcons.Person,
+                title = customer.name,
+                context = if (customer.balanceCents > 0) "Em aberto na caderneta" else "Sem saldo em aberto",
+                primaryText = formatCents(customer.balanceCents),
+                status = if (customer.balanceCents > 0) TinoCardStatus.ERROR else TinoCardStatus.SUCCESS,
+                modifier = Modifier.tinoSharedBounds(TinoSharedKeys.customer(customer.id)).tinoOccupiedBounds("customer-summary"),
+                actionLabel = "Abrir caderneta",
+                onAction = { onNavigate(TinoScreen.CustomerAccount) },
+            ),
+        )
         Text("Dados do cliente", style = MaterialTheme.typography.titleMedium)
         TinoTextField(name, { name = it }, "Nome", "Nome do cliente", labelAbove = true)
         TinoTextField(phone, { phone = it }, "Celular", "Opcional", labelAbove = true)
-        TinoPrimaryButton("SALVAR ALTERAÇÕES") {
-            onUpdateCustomer(customer, name, phone.ifBlank { null })
+        submissionError?.let { errorMessage ->
+            TinoCard {
+                Text("Não foi possível salvar", color = TinoRed, fontWeight = FontWeight.SemiBold)
+                Text(errorMessage, color = TinoMuted)
+            }
         }
+        TinoPrimaryButton(
+            "SALVAR ALTERAÇÕES",
+            {
+                if (!submitting && name.isNotBlank()) scope.launch {
+                    submitting = true
+                    submissionError = null
+                    val failure = onUpdateCustomer(customer, name, phone.ifBlank { null }).exceptionOrNull()
+                    submitting = false
+                    if (failure != null) submissionError = failure.message ?: "Não foi possível salvar o cliente. Tente novamente."
+                }
+            },
+            Modifier,
+            enabled = !submitting && name.isNotBlank(),
+            loading = submitting,
+        )
     }
 }
 
@@ -1332,17 +1845,28 @@ internal fun CustomerDetailScreen(
 internal fun CreditListScreen(
     customers: List<CustomerBalance>,
     onNavigate: (TinoScreen) -> Unit,
-    onAddCustomer: (String, String?) -> Unit,
+    onAddCustomer: suspend (String, String?) -> Result<Unit>,
     onSelectCustomer: (CustomerBalance) -> Unit,
     contextualVoiceState: ContextualVoiceState = ContextualVoiceState.Idle,
     onVoiceStart: () -> Unit = {},
     onVoiceStop: () -> Unit = {},
+    openAddCustomerRequest: Boolean = false,
+    onAddCustomerRequestConsumed: () -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf("Todos") }
     var addCustomerVisible by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
+    var submissionError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(openAddCustomerRequest) {
+        if (openAddCustomerRequest) {
+            addCustomerVisible = true
+            onAddCustomerRequestConsumed()
+        }
+    }
     val searched = customers.filter { it.name.contains(query, true) }
     val shown = when (filter) {
         "Em aberto" -> searched.filter { it.balanceCents > 0 }
@@ -1357,27 +1881,16 @@ internal fun CreditListScreen(
     }
     ScreenColumn(verticalSpacing = TinoSpacing.sm) {
         TinoTopBar("Caderneta") { onNavigate(TinoScreen.Home) }
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = TinoShapes.large,
-            colors = CardDefaults.cardColors(containerColor = TinoSurface),
-            elevation = CardDefaults.cardElevation(defaultElevation = TinoSize.cardElevation),
-        ) {
-            Row(
-                Modifier.fillMaxWidth().padding(TinoSpacing.md),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(TinoSpacing.md),
-            ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(TinoSpacing.xs)) {
-                    Text("Total a receber", color = TinoMuted, style = MaterialTheme.typography.bodySmall)
-                    Text(formatCents(customers.sumOf { it.balanceCents }), color = TinoGreen, style = MaterialTheme.typography.headlineSmall, maxLines = 1, softWrap = false)
-                    Text("${customers.count { it.balanceCents > 0 }} clientes com valor em aberto", color = TinoMuted, style = MaterialTheme.typography.bodySmall)
-                }
-                Box(Modifier.size(44.dp).background(TinoGreenLight, CircleShape), contentAlignment = Alignment.Center) {
-                    Icon(TinoIcons.Credit, contentDescription = "Total a receber", tint = TinoGreen, modifier = Modifier.size(TinoSize.iconLarge))
-                }
-            }
-        }
+        TinoCardRenderer(
+            TinoCardSpec.Metric(
+                icon = TinoIcons.Credit,
+                title = "Total a receber",
+                value = formatCents(customers.sumOf { it.balanceCents }),
+                supportingText = "${customers.count { it.balanceCents > 0 }} clientes com valor em aberto",
+                modifier = Modifier.tinoOccupiedBounds("caderneta-summary"),
+                status = TinoCardStatus.CREDIT,
+            ),
+        )
         TinoSearchField(query, { query = it }, "Procurar pessoa")
         TinoHorizontalCarousel {
             listOf("Todos", "Em aberto", "Sem saldo").forEach { option ->
@@ -1385,31 +1898,65 @@ internal fun CreditListScreen(
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Clientes", style = MaterialTheme.typography.titleMedium)
+            Text("Saldo da caderneta", style = MaterialTheme.typography.titleMedium)
             Text("Ordenar: Maior valor", color = TinoGreen, style = MaterialTheme.typography.labelMedium)
         }
         if (shown.isEmpty()) {
-            TinoEmptyState(TinoIcons.People, if (customers.isEmpty()) "Nenhum cliente cadastrado" else "Nenhum cliente encontrado", if (customers.isEmpty()) "Cadastre o primeiro cliente para começar a caderneta." else "Tente outra busca ou filtro.")
+            TinoEmptyState(
+                TinoIcons.People,
+                if (customers.isEmpty()) "Nenhum cliente cadastrado" else "Nenhum cliente encontrado",
+                if (customers.isEmpty()) "Cadastre o primeiro cliente para começar a caderneta." else "Tente outra busca ou filtro.",
+                illustrationState = if (customers.isEmpty()) {
+                    TinoIllustrationState.LEARNING
+                } else {
+                    TinoIllustrationState.NOT_FOUND
+                },
+            )
         } else {
             shown.sortedByDescending { it.balanceCents }.forEach { customer -> TinoCustomerRow(customer) { onSelectCustomer(customer); onNavigate(TinoScreen.CustomerAccount) } }
         }
-        if (addCustomerVisible) {
-            TinoTextField(name, { name = it }, "Nome", "Nome do cliente", labelAbove = true)
-            TinoTextField(phone, { phone = it }, "Celular", "Opcional", labelAbove = true)
-            ContextualVoicePanel(
-                context = VoiceContext.CUSTOMER_CREATE,
-                state = contextualVoiceState,
-                hint = "Diga o nome e o celular do cliente",
-                onStart = onVoiceStart,
-                onStop = onVoiceStop,
-            )
-            TinoPrimaryButton("SALVAR CLIENTE") {
-                if (name.isNotBlank()) onAddCustomer(name, phone.ifBlank { null })
-                name = ""
-                phone = ""
-                addCustomerVisible = false
+        val reduceMotion = LocalTinoReduceMotion.current
+        AnimatedVisibility(visible = addCustomerVisible, enter = tinoEnter(reduceMotion), exit = tinoExit(reduceMotion)) {
+            Column(verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
+                TinoTextField(name, { name = it }, "Nome", "Nome do cliente", labelAbove = true)
+                TinoTextField(phone, { phone = it }, "Celular", "Opcional", labelAbove = true)
+                submissionError?.let { errorMessage ->
+                    TinoCard {
+                        Text("Não foi possível cadastrar", color = TinoRed, fontWeight = FontWeight.SemiBold)
+                        Text(errorMessage, color = TinoMuted)
+                    }
+                }
+                ContextualVoicePanel(
+                    context = VoiceContext.CUSTOMER_CREATE,
+                    state = contextualVoiceState,
+                    hint = "Diga o nome e o celular do cliente",
+                    onStart = onVoiceStart,
+                    onStop = onVoiceStop,
+                )
+                TinoPrimaryButton(
+                    "SALVAR CLIENTE",
+                    {
+                        if (!submitting && name.isNotBlank()) scope.launch {
+                            submitting = true
+                            submissionError = null
+                            val failure = onAddCustomer(name, phone.ifBlank { null }).exceptionOrNull()
+                            submitting = false
+                            if (failure == null) {
+                                name = ""
+                                phone = ""
+                                addCustomerVisible = false
+                            } else {
+                                submissionError = failure.message ?: "Não foi possível cadastrar o cliente. Tente novamente."
+                            }
+                        }
+                    },
+                    Modifier,
+                    enabled = !submitting && name.isNotBlank(),
+                    loading = submitting,
+                )
             }
-        } else {
+        }
+        AnimatedVisibility(visible = !addCustomerVisible, enter = tinoEnter(reduceMotion), exit = tinoExit(reduceMotion)) {
             TinoSecondaryButton("ADICIONAR CLIENTE") { addCustomerVisible = true }
         }
     }
@@ -1442,7 +1989,12 @@ internal fun SelectCustomerScreen(
         )
         TinoSearchField(query, { query = it }, "Quem está levando?")
         if (shown.isEmpty()) {
-            TinoEmptyState(TinoIcons.People, "Nenhum cliente encontrado", "Volte e cadastre a pessoa antes de anotar o fiado.")
+            TinoEmptyState(
+                TinoIcons.People,
+                "Nenhum cliente encontrado",
+                "Volte e cadastre a pessoa antes de anotar o fiado.",
+                illustrationState = TinoIllustrationState.NOT_FOUND,
+            )
             TinoSecondaryButton("CADASTRAR CLIENTE") { onNavigate(TinoScreen.CreditList) }
         } else {
             shown.forEach { customer ->
@@ -1466,19 +2018,28 @@ internal fun ConfirmCreditScreen(
     ScreenColumn {
         if (customer == null || lines.isEmpty()) {
             TinoTopBar("Confirmar fiado") { onNavigate(TinoScreen.SelectCustomer) }
-            TinoEmptyState(TinoIcons.Credit, "Compra incompleta", "Escolha um cliente e mantenha ao menos um produto na venda.")
+            TinoEmptyState(
+                TinoIcons.Credit,
+                "Compra incompleta",
+                "Escolha um cliente e mantenha ao menos um produto na venda.",
+                illustrationState = TinoIllustrationState.WARNING,
+            )
             TinoSecondaryButton("VOLTAR À VENDA") { onNavigate(TinoScreen.QuickSale) }
             return@ScreenColumn
         }
         val name = customer.name
         val current = customer.balanceCents
         val sale = lines.sumOf { it.quantity * it.product.priceCents }
-        TinoTopBar(name) { onNavigate(TinoScreen.SelectCustomer) }
+        TinoTopBar("Confirmar fiado") { onNavigate(TinoScreen.SelectCustomer) }
         TinoCard {
+            Text("Cliente", color = TinoMuted, style = MaterialTheme.typography.labelMedium)
+            Text(name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text("Resumo da compra", color = TinoMuted, style = MaterialTheme.typography.labelMedium)
             MetricLine("Esta compra", formatCents(sale.toLong()))
             MetricLine("Já devia", formatCents(current.toLong()))
             HorizontalDivider()
             MetricLine("Ficará devendo", formatCents((current + sale).toLong()), true, TinoRed)
+            Text("Ao confirmar, esta compra será anotada na caderneta de $name.", color = TinoMuted, style = MaterialTheme.typography.bodySmall)
         }
         submissionError?.let { errorMessage ->
             TinoCard {
@@ -1502,7 +2063,7 @@ internal fun ConfirmCreditScreen(
                     if (failure == null) onComplete(TinoCompletion("Fiado anotado", "A compra foi vinculada a $name."))
                     else submissionError = failure?.message ?: "Não foi possível anotar o fiado. Tente novamente."
                 }
-            }, Modifier.weight(1f), enabled = !submitting)
+            }, Modifier.weight(1f), enabled = !submitting, loading = submitting)
         }
     }
 }
@@ -1512,17 +2073,25 @@ internal fun CustomerAccountScreen(
     customer: CustomerBalance?,
     timeline: CustomerCreditTimeline?,
     onNavigate: (TinoScreen) -> Unit,
+    statement: SharedLedgerStatement? = null,
 ) {
+    val context = LocalContext.current
     ScreenColumn {
         if (customer == null) {
             TinoTopBar("Conta do cliente") { onNavigate(TinoScreen.CreditList) }
-            TinoEmptyState(TinoIcons.People, "Cliente não selecionado", "Volte à lista e escolha um cliente para consultar a conta.")
-            TinoSecondaryButton("VOLTAR AO FIADO") { onNavigate(TinoScreen.CreditList) }
+            TinoEmptyState(
+                TinoIcons.People,
+                "Cliente não selecionado",
+                "Volte à lista e escolha um cliente para consultar a conta.",
+                illustrationState = TinoIllustrationState.NOT_FOUND,
+            )
             return@ScreenColumn
         }
         TinoTopBar(customer.name) { onNavigate(TinoScreen.CreditList) }
-        Text("Está devendo", color = TinoMuted)
-        Text(formatCents(customer.balanceCents.toLong()), color = TinoRed, style = MaterialTheme.typography.displaySmall)
+        TinoCard(Modifier.tinoSharedBounds(TinoSharedKeys.customer(customer.id))) {
+            Text("Está devendo", color = TinoMuted)
+            Text(formatCents(customer.balanceCents.toLong()), color = TinoRed, style = MaterialTheme.typography.displaySmall)
+        }
         timeline?.let { account ->
             val statusText = when {
                 account.overdueCents > 0 -> "Atrasado"
@@ -1531,39 +2100,37 @@ internal fun CustomerAccountScreen(
             }
             TinoStatusBadge(statusText, if (account.overdueCents > 0) TinoStatus.Error else TinoStatus.Normal)
             TinoSectionHeader("Linha do tempo")
-            val events = buildList {
-                account.entries.forEach { entry ->
-                    add(
-                        TimelineUiItem(
-                            occurredAt = entry.occurredAt,
-                            label = "Fiado",
-                            amount = "+${formatCents(entry.amountCents)}",
-                        ),
-                    )
-                }
-                account.payments.forEach { payment ->
-                    add(
-                        TimelineUiItem(
-                            occurredAt = payment.occurredAt,
-                            label = "Pagou ${paymentMethodLabel(payment.paymentMethod)}",
-                            amount = "-${formatCents(payment.amountCents)}",
-                        ),
-                    )
-                }
-            }.sortedByDescending { it.occurredAt }
+            val events = account.ledgerEvents.map { event ->
+                TimelineUiItem(
+                    occurredAt = event.occurredAt,
+                    label = ledgerTimelineLabel(event.type, event.paymentMethod),
+                    amount = signedLedgerAmount(event.signedAmountCents),
+                )
+            }
             if (events.isEmpty()) {
                 Text("Nenhum lançamento nesta conta ainda.", color = TinoMuted)
             } else {
-                TinoCard {
-                    events.forEachIndexed { index, event ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(TinoSpacing.sm), verticalAlignment = Alignment.CenterVertically) {
-                            Text(formatTimelineDate(event.occurredAt), modifier = Modifier.width(52.dp), color = TinoMuted, style = MaterialTheme.typography.labelSmall)
-                            Text(event.label, modifier = Modifier.weight(1f), color = TinoInk)
-                            Text(event.amount, color = if (event.amount.startsWith("+")) TinoRed else TinoGreen, fontWeight = FontWeight.Bold)
-                        }
-                        if (index < events.lastIndex) HorizontalDivider()
-                    }
+                TinoCardRenderer(
+                    TinoCardSpec.Timeline(
+                        title = "Lançamentos",
+                        items = events.map { event ->
+                            Triple(event.label, event.amount, formatTimelineDate(event.occurredAt))
+                        },
+                        footerLabel = null,
+                    ),
+                )
+            }
+        }
+        statement?.let { account ->
+            TinoSecondaryButton("COMPARTILHAR EXTRATO") {
+                val share = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(
+                        Intent.EXTRA_TEXT,
+                        SharedLedgerStatementFormatter.text(account, java.time.ZoneId.systemDefault()),
+                    )
                 }
+                context.startActivity(Intent.createChooser(share, "Compartilhar extrato"))
             }
         }
         TinoPrimaryButton("RECEBER PAGAMENTO", { onNavigate(TinoScreen.ReceivePayment) }, Modifier, enabled = customer.balanceCents > 0)
@@ -1571,6 +2138,21 @@ internal fun CustomerAccountScreen(
 }
 
 private data class TimelineUiItem(val occurredAt: Long, val label: String, val amount: String)
+
+private fun ledgerTimelineLabel(type: SharedLedgerEventType, paymentMethod: String?): String = when (type) {
+    SharedLedgerEventType.PURCHASE -> "Fiado"
+    SharedLedgerEventType.PAYMENT -> "Pagou ${paymentMethodLabel(paymentMethod.orEmpty())}"
+    SharedLedgerEventType.ADJUSTMENT -> "Ajuste"
+    SharedLedgerEventType.REVERSAL -> "Reversão"
+    SharedLedgerEventType.DISPUTE -> "Contestação"
+    SharedLedgerEventType.SETTLEMENT -> "Quitação"
+}
+
+private fun signedLedgerAmount(cents: Long): String = if (cents >= 0L) {
+    "+${formatCents(cents)}"
+} else {
+    "-${formatCents(-cents)}"
+}
 
 internal fun formatTimelineDate(timestamp: Long): String = java.time.Instant.ofEpochMilli(timestamp)
     .atZone(java.time.ZoneId.systemDefault())
@@ -1594,7 +2176,12 @@ internal fun ReceivePaymentScreen(
     ScreenColumn {
         if (customer == null) {
             TinoTopBar("Receber pagamento") { onNavigate(TinoScreen.CreditList) }
-            TinoEmptyState(TinoIcons.Credit, "Cliente não selecionado", "Volte ao fiado e escolha um cliente antes de receber.")
+            TinoEmptyState(
+                TinoIcons.Credit,
+                "Cliente não selecionado",
+                "Volte ao fiado e escolha um cliente antes de receber.",
+                illustrationState = TinoIllustrationState.NOT_FOUND,
+            )
             TinoSecondaryButton("VOLTAR AO FIADO") { onNavigate(TinoScreen.CreditList) }
             return@ScreenColumn
         }
@@ -1631,7 +2218,7 @@ internal fun ReceivePaymentScreen(
                 if (failure == null) onComplete(TinoCompletion("Pagamento registrado", "O saldo de ${customer.name} foi atualizado."))
                 else submissionError = failure.message ?: "Não foi possível registrar o pagamento. Tente novamente."
             }
-        }, Modifier, enabled = canConfirm && !submitting)
+        }, Modifier, enabled = canConfirm && !submitting, loading = submitting)
     }
 }
 
@@ -1659,7 +2246,14 @@ internal fun NewProductScreen(
         fields["stock_initial"]?.takeIf { it.isNotBlank() }?.let { stock = it }
     }
     ScreenColumn {
-        TinoTopBar("Novo produto") { onNavigate(TinoScreen.Products) }
+        TinoContextHeader(
+            title = "Novo produto",
+            subtitle = "Cadastre uma vez e venda sem complicar.",
+            icon = TinoIcons.Products,
+            style = TinoHeaderStyle.Form,
+            onBack = { onNavigate(TinoScreen.Products) },
+        )
+        TinoSectionLabel("Informações essenciais")
         TinoTextField(name, { name = it }, "Nome", "Ex.: Café 250g")
         TinoMoneyField(price, { price = it }, "Preço de venda")
         TinoTextField(stock, { stock = it }, "Estoque inicial", "Ex.: 12")
@@ -1692,7 +2286,7 @@ internal fun NewProductScreen(
                 if (failure == null) onNavigate(TinoScreen.Products)
                 else submissionError = failure.message ?: "Não foi possível cadastrar o produto. Tente novamente."
             }
-        }, Modifier, enabled = canCreate && !submitting)
+        }, Modifier, enabled = canCreate && !submitting, loading = submitting)
     }
 }
 
@@ -1701,7 +2295,12 @@ internal fun AdjustStockScreen(product: ProductSummary?, onNavigate: (TinoScreen
     ScreenColumn {
         if (product == null) {
             TinoTopBar("Ajustar estoque") { onNavigate(TinoScreen.Products) }
-            TinoEmptyState(TinoIcons.Products, "Produto não selecionado", "Volte à lista e escolha um produto para ajustar o estoque.")
+            TinoEmptyState(
+                TinoIcons.Products,
+                "Produto não selecionado",
+                "Volte à lista e escolha um produto para ajustar o estoque.",
+                illustrationState = TinoIllustrationState.NOT_FOUND,
+            )
             TinoSecondaryButton("VOLTAR A PRODUTOS") { onNavigate(TinoScreen.Products) }
         } else {
             TinoTopBar("Ajustar ${product.name}") { onNavigate(TinoScreen.ProductDetail) }
@@ -1709,6 +2308,7 @@ internal fun AdjustStockScreen(product: ProductSummary?, onNavigate: (TinoScreen
                 TinoIcons.Products,
                 "Ajuste manual indisponível",
                 "Para atualizar o estoque agora, registre uma entrada de mercadoria.",
+                illustrationState = TinoIllustrationState.EXPLAINING,
             )
             TinoPrimaryButton("REGISTRAR ENTRADA") { onNavigate(TinoScreen.StockEntry) }
         }
@@ -1719,12 +2319,13 @@ internal fun AdjustStockScreen(product: ProductSummary?, onNavigate: (TinoScreen
 internal fun StockEntryScreen(
     onNavigate: (TinoScreen) -> Unit,
     onReceiveStock: suspend (String, String, String, String) -> Result<Unit>,
+    product: ProductSummary? = null,
     contextualVoiceState: ContextualVoiceState = ContextualVoiceState.Idle,
     onVoiceStart: () -> Unit = {},
     onVoiceStop: () -> Unit = {},
 ) {
-    var productName by remember { mutableStateOf("") }
-    var quantity by remember { mutableStateOf("") }
+    var productName by remember(product?.id) { mutableStateOf(product?.name.orEmpty()) }
+    var quantity by remember(product?.id) { mutableStateOf(if (product != null) "1" else "") }
     var cost by remember { mutableStateOf("") }
     var supplier by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
@@ -1739,11 +2340,32 @@ internal fun StockEntryScreen(
         fields["supplier"]?.takeIf { it.isNotBlank() }?.let { supplier = it }
     }
     ScreenColumn {
-        TinoTopBar("Entrada de mercadoria") { onNavigate(TinoScreen.Products) }
-        Text("O que chegou?", style = MaterialTheme.typography.titleLarge)
-        Text("Registre a entrada para atualizar o estoque local.", color = TinoMuted)
-        TinoTextField(productName, { productName = it }, "Produto", "Nome exato do produto")
-        TinoTextField(quantity, { quantity = it }, "Quantidade", "Ex.: 24")
+        TinoContextHeader(
+            title = "Entrada de mercadoria",
+            subtitle = "Atualize o estoque com o que acabou de chegar.",
+            icon = TinoIcons.Input,
+            style = TinoHeaderStyle.Inventory,
+            onBack = { onNavigate(TinoScreen.Products) },
+        )
+        TinoSectionLabel("Mercadoria recebida")
+        if (product == null) {
+            TinoTextField(productName, { productName = it }, "Produto", "Nome exato do produto")
+        } else {
+            TinoCard {
+                Text(product.name, style = MaterialTheme.typography.titleMedium)
+                Text("Produto selecionado", color = TinoMuted, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        if (product == null) {
+            TinoTextField(quantity, { quantity = it }, "Quantidade", "Ex.: 24")
+        } else {
+            Text("Quantidade", color = TinoMuted, style = MaterialTheme.typography.labelMedium)
+            TinoQuantitySelector(
+                quantity = quantity.toIntOrNull() ?: 1,
+                onDecrease = { quantity = ((quantity.toIntOrNull() ?: 1) - 1).coerceAtLeast(1).toString() },
+                onIncrease = { quantity = ((quantity.toIntOrNull() ?: 1) + 1).toString() },
+            )
+        }
         TinoMoneyField(cost, { cost = it }, "Custo unitário")
         TinoTextField(supplier, { supplier = it }, "Fornecedor (opcional)", "Nome do fornecedor")
         submissionError?.let { errorMessage ->
@@ -1774,6 +2396,7 @@ internal fun StockEntryScreen(
             },
             Modifier,
             enabled = canSave && !submitting,
+            loading = submitting,
         )
     }
 }
@@ -1783,52 +2406,33 @@ internal fun FiscalFoundScreen(
     onNavigate: (TinoScreen) -> Unit,
     onImageSelected: (Uri) -> Unit = {},
 ) {
-    val imagePicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent(),
-    ) { uri -> uri?.let(onImageSelected) }
     ScreenColumn {
-        TinoTopBar("Ler nota") { onNavigate(TinoScreen.StockEntry) }
+        TinoContextHeader(
+            title = "Dar entrada de mercadoria",
+            subtitle = "Escolha como registrar o que acabou de chegar.",
+            icon = TinoIcons.Input,
+            style = TinoHeaderStyle.Inventory,
+            onBack = { onNavigate(TinoScreen.Products) },
+        )
         TinoCard {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(TinoSpacing.md),
-            ) {
-                Surface(
-                    modifier = Modifier.size(54.dp),
-                    shape = CircleShape,
-                    color = TinoGreenLight,
-                ) {
-                    Icon(
-                        TinoIcons.Camera,
-                        contentDescription = null,
-                        tint = TinoGreenDark,
-                        modifier = Modifier.padding(14.dp),
-                    )
-                }
-                Column(Modifier.weight(1f)) {
-                    Text("Escanear nota", style = MaterialTheme.typography.titleMedium)
-                    Text("Enquadre a nota inteira. O TINO ajuda a conferir os produtos.", color = TinoMuted)
-                }
-            }
+            Text("Usar NF-e", style = MaterialTheme.typography.titleMedium)
+            Text("Informe a chave de acesso. O backend consulta a nota e prepara a conferência.", color = TinoMuted)
             Spacer(Modifier.height(TinoSpacing.md))
-            TinoPrimaryButton("ESCANEAR NOTA") { onNavigate(TinoScreen.DocumentCamera) }
-            Spacer(Modifier.height(TinoSpacing.sm))
-            TinoSecondaryButton("ESCOLHER UMA FOTO") {
-                imagePicker.launch("image/*")
-            }
-            Text(
-                "Você também pode escolher uma foto já salva no celular.",
-                color = TinoMuted,
-                style = MaterialTheme.typography.bodySmall,
-            )
+            TinoPrimaryButton("USAR NF-e") { onNavigate(TinoScreen.NfeKeyEntry) }
+        }
+        TinoCard {
+            Text("Usar NFC-e", style = MaterialTheme.typography.titleMedium)
+            Text("Leia o QR Code e consulte a NFC-e do Piauí com a verificação humana.", color = TinoMuted)
+            Spacer(Modifier.height(TinoSpacing.md))
+            TinoPrimaryButton("LER QR DA NFC-e") { onNavigate(TinoScreen.NfceCapture) }
         }
         TinoEmptyState(
-            TinoIcons.Document,
-            "Comece pela nota de entrada",
-            "O TINO vai encontrar os produtos. Nada entra no estoque sem sua confirmação.",
+            TinoIcons.Input,
+            "Registrar manualmente",
+            "Funciona offline e não depende de NF-e, SERPRO ou backend.",
+            illustrationState = TinoIllustrationState.EXPLAINING,
         )
-        TinoSecondaryButton("PREENCHER MANUALMENTE") { onNavigate(TinoScreen.StockEntry) }
+        TinoSecondaryButton("REGISTRAR MANUALMENTE") { onNavigate(TinoScreen.StockEntry) }
     }
 }
 
@@ -1848,7 +2452,7 @@ internal fun FiscalReviewScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(TinoSpacing.md),
                 ) {
-                    Icon(TinoIcons.Success, contentDescription = null, tint = TinoGreen, modifier = Modifier.size(32.dp))
+                    Icon(TinoIcons.Success, contentDescription = null, tint = TinoGreen, modifier = Modifier.size(TinoSize.iconLarge))
                     Column {
                         Text("Nota lida", style = MaterialTheme.typography.titleMedium)
                         Text("Confira os produtos antes de registrar a entrada.", color = TinoMuted)
@@ -1878,18 +2482,31 @@ internal fun FiscalReviewScreen(
                         "Tente outra foto, com a nota inteira e boa luz.",
                         actionLabel = "TENTAR NOVAMENTE",
                         onAction = { onNavigate(TinoScreen.DocumentCamera) },
+                        illustrationState = TinoIllustrationState.ERROR,
                     )
                 }
                 null -> TinoEmptyState(
                     TinoIcons.Document,
                     "Nenhum produto encontrado",
                     "A foto não trouxe linhas de produto legíveis.",
+                    illustrationState = TinoIllustrationState.NOT_FOUND,
                 )
             }
         } else {
-            TinoEmptyState(TinoIcons.Document, "Nenhuma nota para conferir", "A conferência aparecerá aqui depois que uma nota for importada.")
+            TinoEmptyState(
+                TinoIcons.Document,
+                "Nenhuma nota para conferir",
+                "A conferência aparecerá aqui depois que uma nota for importada.",
+                illustrationState = TinoIllustrationState.EXPLAINING,
+            )
         }
-        TinoPrimaryButton("ESCANEAR OUTRA NOTA") { onNavigate(TinoScreen.DocumentCamera) }
+        if (captured && result is ProductImportResult.Success && result.products.isNotEmpty()) {
+            TinoPrimaryButton("CONTINUAR ENTRADA MANUAL") { onNavigate(TinoScreen.StockEntry) }
+        } else if (captured && result is ProductImportResult.NeedsReview && result.products.isNotEmpty()) {
+            TinoPrimaryButton("CORRIGIR ENTRADA MANUALMENTE") { onNavigate(TinoScreen.StockEntry) }
+        } else {
+            TinoPrimaryButton("ESCANEAR OUTRA NOTA") { onNavigate(TinoScreen.DocumentCamera) }
+        }
         TinoSecondaryButton("VOLTAR PARA LER NOTA") { onNavigate(TinoScreen.FiscalFound) }
     }
 }
@@ -1904,7 +2521,7 @@ internal fun FiscalRectifiedPreview(path: String) {
             Image(
                 bitmap = preview,
                 contentDescription = "Prévia retificada da nota",
-                modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(max = TinoSize.fiscalPreviewMaxHeight),
                 contentScale = ContentScale.Fit,
             )
         }
@@ -1947,11 +2564,106 @@ internal fun FiscalImportedProductRow(product: com.tino.fiscal.core.ImportedProd
 }
 
 @Composable
-internal fun PurchaseSuggestionsScreen(onNavigate: (TinoScreen) -> Unit) {
+internal fun PurchaseSuggestionsScreen(
+    products: List<ProductSummary>,
+    suppliers: List<SupplierEntity>,
+    onCreateSupplierOrder: suspend (String, Int, Long, String, Long) -> Result<Unit>,
+    onNavigate: (TinoScreen) -> Unit,
+) {
+    var productQuery by remember { mutableStateOf("") }
+    var selectedProductId by remember { mutableStateOf<String?>(null) }
+    var selectedSupplierId by remember { mutableStateOf<String?>(null) }
+    var quantity by remember { mutableStateOf("1") }
+    var unitCost by remember { mutableStateOf("0,00") }
+    var expectedDays by remember { mutableStateOf("7") }
+    var submitting by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val selectedProduct = products.firstOrNull { it.id == selectedProductId }
+    val matchingProducts = products.filter { it.name.contains(productQuery, ignoreCase = true) }.take(5)
+    val parsedQuantity = quantity.toIntOrNull() ?: 0
+    val parsedCost = parseCentsForUi(unitCost)
+    val parsedDays = expectedDays.toIntOrNull() ?: 0
+
     ScreenColumn {
-        TinoTopBar("Sugestões de compra") { onNavigate(TinoScreen.More) }
-        TinoEmptyState(TinoIcons.Cart, "Nenhuma sugestão ainda", "Quando um produto estiver acabando, o TINO vai mostrar uma sugestão aqui.")
-        TinoSecondaryButton("VER PRODUTOS") { onNavigate(TinoScreen.Products) }
+        TinoContextHeader(
+            title = "Pedido ao fornecedor",
+            subtitle = "Planeje a próxima reposição do seu estoque.",
+            icon = TinoIcons.Supplier,
+            style = TinoHeaderStyle.Inventory,
+            onBack = { onNavigate(TinoScreen.More) },
+        )
+        TinoSectionLabel("O que precisa chegar")
+        TinoCard {
+            Text("Registrar uma entrega prevista", style = MaterialTheme.typography.titleMedium)
+            Text("O TINO só avisará sobre atraso quando existir um pedido com data prevista e recebimento controlado.", color = TinoMuted)
+        }
+        if (products.isEmpty() || suppliers.isEmpty()) {
+            TinoEmptyState(
+                TinoIcons.Supplier,
+                if (products.isEmpty()) "Cadastre um produto primeiro" else "Cadastre um fornecedor primeiro",
+                "Produto e fornecedor são necessários para acompanhar uma entrega.",
+                illustrationState = TinoIllustrationState.LEARNING,
+            )
+            TinoSecondaryButton("VOLTAR PARA MAIS") { onNavigate(TinoScreen.More) }
+        } else {
+            TinoSearchField(productQuery, { productQuery = it }, "Procurar produto")
+            matchingProducts.forEach { product ->
+                TinoListRow(
+                    icon = TinoIcons.Products,
+                    title = product.name,
+                    supportingText = "${product.stockQuantity} ${product.unit} em estoque",
+                    onClick = {
+                    selectedProductId = product.id
+                    productQuery = product.name
+                    },
+                )
+            }
+            selectedProduct?.let { product ->
+                TinoCard {
+                    Text("Produto selecionado", style = MaterialTheme.typography.titleSmall)
+                    Text(product.name, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            TinoSectionLabel("De quem comprar")
+            suppliers.take(5).forEach { supplier ->
+                TinoFilterChip(
+                    label = supplier.name,
+                    selected = selectedSupplierId == supplier.id,
+                    onClick = { selectedSupplierId = supplier.id },
+                )
+            }
+            TinoTextField(quantity, { quantity = it }, "Quantidade", "Ex.: 10")
+            TinoTextField(unitCost, { unitCost = it }, "Custo unitário", "Ex.: 4,50")
+            TinoTextField(expectedDays, { expectedDays = it }, "Entrega em quantos dias?", "Ex.: 7")
+            errorMessage?.let { Text(it, color = TinoRed) }
+            TinoPrimaryButton(
+                "REGISTRAR PEDIDO",
+                {
+                    val supplierId = selectedSupplierId
+                    if (!submitting && selectedProduct != null && supplierId != null && parsedQuantity > 0 &&
+                        parsedCost >= 0 && parsedDays > 0
+                    ) scope.launch {
+                        submitting = true
+                        errorMessage = null
+                        val failure = onCreateSupplierOrder(
+                            selectedProduct.id,
+                            parsedQuantity,
+                            parsedCost,
+                            supplierId,
+                            System.currentTimeMillis() + parsedDays * 24L * 60L * 60L * 1_000L,
+                        ).exceptionOrNull()
+                        submitting = false
+                        if (failure == null) onNavigate(TinoScreen.SupplierOrder)
+                        else errorMessage = failure.message ?: "Não foi possível registrar o pedido."
+                    }
+                },
+                Modifier,
+                enabled = selectedProduct != null && selectedSupplierId != null && parsedQuantity > 0 &&
+                    parsedCost >= 0 && parsedDays > 0 && !submitting,
+                loading = submitting,
+            )
+        }
     }
 }
 
@@ -1976,10 +2688,21 @@ internal fun NewOrderScreen(
     val parsedQuantity = quantity.toIntOrNull() ?: 0
 
     ScreenColumn {
-        TinoTopBar("Novo pedido") { onNavigate(TinoScreen.Orders) }
-        Text("O que o cliente pediu?", style = MaterialTheme.typography.titleLarge)
+        TinoContextHeader(
+            title = "Novo pedido",
+            subtitle = "Monte o pedido e combine a forma de entrega.",
+            icon = TinoIcons.Orders,
+            style = TinoHeaderStyle.Form,
+            onBack = { onNavigate(TinoScreen.Orders) },
+        )
+        TinoSectionLabel("Item do pedido")
         if (products.isEmpty()) {
-            TinoEmptyState(TinoIcons.Products, "Nenhum produto cadastrado", "Cadastre um produto antes de criar um pedido.")
+            TinoEmptyState(
+                TinoIcons.Products,
+                "Nenhum produto cadastrado",
+                "Cadastre um produto antes de criar um pedido.",
+                illustrationState = TinoIllustrationState.LEARNING,
+            )
             TinoSecondaryButton("VOLTAR A PRODUTOS") { onNavigate(TinoScreen.Products) }
         } else {
             TinoSearchField(query, { query = it }, "Procurar produto")
@@ -1996,10 +2719,16 @@ internal fun NewOrderScreen(
                     Text(formatCents(product.priceCents), color = TinoMuted)
                 }
             }
+            TinoSectionLabel("Para quem e como")
             TinoTextField(quantity, { quantity = it }, "Quantidade", "Ex.: 2")
             TinoTextField(customerName, { customerName = it }, "Cliente (opcional)", "Nome do cliente")
             customerSuggestions.forEach { customer ->
-                TinoSecondaryButton(customer.name) { customerName = customer.name }
+                TinoListRow(
+                    icon = TinoIcons.Person,
+                    title = customer.name,
+                    supportingText = "Cliente cadastrado",
+                    onClick = { customerName = customer.name },
+                )
             }
             Text("Como será recebido?", style = MaterialTheme.typography.titleMedium)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
@@ -2022,17 +2751,56 @@ internal fun NewOrderScreen(
                     if (failure == null) onNavigate(TinoScreen.Orders)
                     else submissionError = failure.message ?: "Não foi possível criar o pedido. Tente novamente."
                 }
-            }, Modifier, enabled = selectedProduct != null && parsedQuantity > 0 && !submitting)
+            }, Modifier, enabled = selectedProduct != null && parsedQuantity > 0 && !submitting, loading = submitting)
         }
     }
 }
 
 @Composable
-internal fun SupplierOrderScreen(onNavigate: (TinoScreen) -> Unit) {
+internal fun SupplierOrderScreen(
+    purchases: List<com.tino.app.core.database.PurchaseEntity>,
+    suppliers: List<SupplierEntity>,
+    onReceiveSupplierOrder: suspend (String) -> Result<Unit>,
+    onNavigate: (TinoScreen) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var receivingId by remember { mutableStateOf<String?>(null) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val supplierNames = suppliers.associate { it.id to it.name }
+    val openPurchases = purchases.filter { it.status == com.tino.app.core.database.PurchaseStatus.ORDERED }
     ScreenColumn {
-        TinoTopBar("Pedido") { onNavigate(TinoScreen.PurchaseSuggestions) }
-        TinoEmptyState(TinoIcons.Supplier, "Nenhum pedido preparado", "Monte uma sugestão de compra antes de enviar um pedido.")
-        TinoSecondaryButton("VER SUGESTÕES") { onNavigate(TinoScreen.PurchaseSuggestions) }
+        TinoTopBar("Entregas ao fornecedor") { onNavigate(TinoScreen.More) }
+        if (openPurchases.isEmpty()) {
+            TinoEmptyState(
+                TinoIcons.Success,
+                "Nenhuma entrega pendente",
+                "Os pedidos recebidos aparecerão no histórico do TINO.",
+                illustrationState = TinoIllustrationState.SUCCESS,
+            )
+        } else {
+            openPurchases.forEach { purchase ->
+                TinoCard {
+                    Text(supplierNames[purchase.supplierId] ?: "Fornecedor não identificado", style = MaterialTheme.typography.titleMedium)
+                    Text("Entrega prevista: ${purchase.expectedDeliveryAt?.let(::formatTimelineDate) ?: "sem data"}", color = TinoMuted)
+                    Text("Total: ${formatCents(purchase.totalCostCents)}", color = TinoMuted)
+                    TinoPrimaryButton(
+                        "REGISTRAR RECEBIMENTO",
+                        {
+                            if (receivingId == null) scope.launch {
+                                receivingId = purchase.id
+                                errorMessage = onReceiveSupplierOrder(purchase.id).exceptionOrNull()?.message
+                                receivingId = null
+                            }
+                        },
+                        Modifier,
+                        enabled = receivingId == null,
+                        loading = receivingId == purchase.id,
+                    )
+                }
+            }
+            errorMessage?.let { Text(it, color = TinoRed) }
+        }
+        TinoSecondaryButton("NOVO PEDIDO") { onNavigate(TinoScreen.PurchaseSuggestions) }
     }
 }
 
@@ -2056,12 +2824,27 @@ internal fun SuppliersScreen(
         fields["phone"]?.takeIf { it.isNotBlank() }?.let { phone = it }
     }
     ScreenColumn {
-        TinoTopBar("Fornecedores") { onNavigate(TinoScreen.More) }
+        TinoContextHeader(
+            title = "Fornecedores",
+            subtitle = "Quem ajuda a abastecer seu comércio.",
+            icon = TinoIcons.Supplier,
+            style = TinoHeaderStyle.Directory,
+            onBack = { onNavigate(TinoScreen.More) },
+        )
+        TinoSectionLabel("Lista de fornecedores")
         if (suppliers.isEmpty()) {
-            TinoEmptyState(TinoIcons.Supplier, "Nenhum fornecedor cadastrado", "Cadastre quem abastece seu comércio para usar nas entradas.")
+            TinoEmptyState(
+                TinoIcons.Supplier,
+                "Nenhum fornecedor cadastrado",
+                "Cadastre quem abastece seu comércio para usar nas entradas.",
+                illustrationState = TinoIllustrationState.LEARNING,
+            )
         } else {
-            suppliers.forEach { supplier -> TinoSupplierRow(supplier.name, "Fornecedor cadastrado") }
+            suppliers.forEach { supplier ->
+                TinoSupplierRow(supplier.name, "Fornecedor cadastrado", sharedKey = supplier.id)
+            }
         }
+        TinoSectionLabel("Novo cadastro")
         TinoTextField(name, { name = it }, "Novo fornecedor", "Nome")
         TinoTextField(phone, { phone = it }, "Celular (opcional)", "Ex.: (86) 9 4209-3500")
         submissionError?.let { errorMessage ->
@@ -2091,7 +2874,7 @@ internal fun SuppliersScreen(
                     submissionError = failure.message ?: "Não foi possível cadastrar o fornecedor. Tente novamente."
                 }
             }
-        }, Modifier, enabled = !submitting && name.isNotBlank())
+        }, Modifier, enabled = !submitting && name.isNotBlank(), loading = submitting)
     }
 }
 
@@ -2105,7 +2888,12 @@ internal fun OrdersScreen(
         TinoTopBar("Pedidos") { onNavigate(TinoScreen.More) }
         TinoPrimaryButton("NOVO PEDIDO") { onNavigate(TinoScreen.NewOrder) }
         if (orders.isEmpty()) {
-            TinoEmptyState(TinoIcons.Orders, "Nenhum pedido recebido", "Quando chegar um pedido, ele aparecerá aqui com o próximo passo.")
+            TinoEmptyState(
+                TinoIcons.Orders,
+                "Nenhum pedido recebido",
+                "Quando chegar um pedido, ele aparecerá aqui com o próximo passo.",
+                illustrationState = TinoIllustrationState.EXPLAINING,
+            )
         } else {
             Text("Pedidos recentes", style = MaterialTheme.typography.titleMedium)
             orders.forEach { order ->
@@ -2114,10 +2902,10 @@ internal fun OrdersScreen(
                     customer = order.customerName ?: "Cliente não informado",
                     total = formatCents(order.totalCents),
                     onClick = { onOpenOrder(order.id) },
+                    sharedKey = order.id,
                 )
             }
         }
-        TinoSecondaryButton("VOLTAR PARA MAIS") { onNavigate(TinoScreen.More) }
     }
 }
 
@@ -2143,10 +2931,15 @@ internal fun OrderDetailScreen(
     ScreenColumn {
         TinoTopBar("Detalhe do pedido") { onNavigate(TinoScreen.Orders) }
         if (detail == null) {
-            TinoEmptyState(TinoIcons.Orders, "Carregando pedido", "Aguarde os dados do pedido serem carregados.")
+            TinoLoadingState(
+                TinoIcons.Orders,
+                "Carregando pedido",
+                "Aguarde os dados do pedido serem carregados.",
+                illustrationState = TinoIllustrationState.LOADING,
+            )
         } else {
             val order = detail.order
-            TinoCard {
+            TinoCard(Modifier.tinoSharedBounds(TinoSharedKeys.order(order.id))) {
                 Text(order.customerName ?: "Cliente não informado", style = MaterialTheme.typography.titleLarge)
                 Text("${order.fulfillment.toOrderFulfillmentLabel()} · ${order.status.toOrderStatusLabel()}", color = TinoMuted)
                 Text(formatCents(order.totalCents), style = MaterialTheme.typography.headlineSmall, color = TinoGreen, fontWeight = FontWeight.Bold)
@@ -2178,7 +2971,7 @@ internal fun OrderDetailScreen(
                         submitting = false
                         if (failure != null) error = failure.message ?: "Tente novamente."
                     }
-                }, Modifier, enabled = !submitting)
+                }, Modifier, enabled = !submitting, loading = submitting)
             }
             if (order.status == "PREPARING") {
                 TinoSecondaryButton("ABRIR SEPARAÇÃO") { onNavigate(TinoScreen.Picking) }
@@ -2215,7 +3008,12 @@ internal fun PickingScreen(
     ScreenColumn {
         TinoTopBar("Separar pedido") { onNavigate(TinoScreen.OrderDetail) }
         if (detail == null) {
-            TinoEmptyState(TinoIcons.Orders, "Carregando pedido", "Aguarde os itens do pedido serem carregados.")
+            TinoLoadingState(
+                TinoIcons.Orders,
+                "Carregando pedido",
+                "Aguarde os itens do pedido serem carregados.",
+                illustrationState = TinoIllustrationState.LOADING,
+            )
         } else {
             Text(detail.order.customerName ?: "Cliente não informado", style = MaterialTheme.typography.titleLarge)
             detail.items.forEach { item ->
@@ -2233,7 +3031,7 @@ internal fun PickingScreen(
                     submitting = false
                     if (submissionError == null) onNavigate(TinoScreen.OrderDetail)
                 }
-            }, Modifier, enabled = !submitting)
+            }, Modifier, enabled = !submitting, loading = submitting)
             submissionError?.let { Text(it, color = TinoRed) }
         }
         TinoSecondaryButton("VOLTAR AO PEDIDO") { onNavigate(TinoScreen.OrderDetail) }
@@ -2252,7 +3050,12 @@ internal fun DeliveryScreen(
     ScreenColumn {
         TinoTopBar("Entrega") { onNavigate(TinoScreen.Orders) }
         if (detail == null) {
-            TinoEmptyState(TinoIcons.Location, "Carregando entrega", "Aguarde os dados do pedido serem carregados.")
+            TinoLoadingState(
+                TinoIcons.Location,
+                "Carregando entrega",
+                "Aguarde os dados do pedido serem carregados.",
+                illustrationState = TinoIllustrationState.LOADING,
+            )
         } else {
             TinoCard {
                 Text("Entregar para", style = MaterialTheme.typography.titleMedium)
@@ -2266,7 +3069,7 @@ internal fun DeliveryScreen(
                     submitting = false
                     if (submissionError == null) onNavigate(TinoScreen.OrderDetail)
                 }
-            }, Modifier, enabled = !submitting)
+            }, Modifier, enabled = !submitting, loading = submitting)
             submissionError?.let { Text(it, color = TinoRed) }
         }
         TinoSecondaryButton("VOLTAR A PEDIDOS") { onNavigate(TinoScreen.Orders) }
@@ -2274,12 +3077,30 @@ internal fun DeliveryScreen(
 }
 
 @Composable
-internal fun InsightsScreen(products: List<ProductSummary>, onNavigate: (TinoScreen) -> Unit) {
-    val attention = products.filter { it.stockQuantity in 0..6 }
+internal fun InsightsScreen(
+    products: List<ProductSummary>,
+    attentionItems: List<AttentionRecord> = emptyList(),
+    onNavigate: (TinoScreen) -> Unit,
+) {
+    val attention = products.filter { it.stockTracked && it.stockQuantity in 0..6 }
     ScreenColumn {
         TinoTopBar("O TINO percebeu") { onNavigate(TinoScreen.Home) }
-        if (attention.isEmpty()) {
-            TinoEmptyState(TinoIcons.Trends, "Nenhum alerta por enquanto", "O TINO vai avisar quando houver algo importante no seu estoque.")
+        if (attentionItems.isNotEmpty()) {
+            Text("Acompanhe de perto", style = MaterialTheme.typography.titleMedium)
+            attentionItems.forEach { item ->
+                TinoInsightCard(
+                    title = item.title,
+                    message = item.explanation,
+                    onView = { onNavigate(TinoScreen.Home) },
+                )
+            }
+        } else if (attention.isEmpty()) {
+            TinoEmptyState(
+                TinoIcons.Trends,
+                "Nenhum alerta por enquanto",
+                "O TINO vai avisar quando houver algo importante no seu estoque.",
+                illustrationState = TinoIllustrationState.SUCCESS,
+            )
         } else {
             Text("Acompanhe de perto", style = MaterialTheme.typography.titleMedium)
             attention.forEach { product ->
@@ -2304,9 +3125,13 @@ internal fun DailySummaryScreen(todayTotal: Long, todaySales: Int, creditTotal: 
             MetricLine("Em aberto no fiado", formatCents(creditTotal), true, TinoRed)
         }
         if (todaySales == 0) {
-            TinoEmptyState(TinoIcons.Calendar, "Nenhuma venda hoje", "O resumo será preenchido conforme você registrar as vendas.")
+            TinoEmptyState(
+                TinoIcons.Calendar,
+                "Nenhuma venda hoje",
+                "O resumo será preenchido conforme você registrar as vendas.",
+                illustrationState = TinoIllustrationState.EXPLAINING,
+            )
         }
-        TinoSecondaryButton("VOLTAR PARA MAIS") { onNavigate(TinoScreen.More) }
     }
 }
 
@@ -2315,7 +3140,7 @@ internal fun AskTinoScreen(onNavigate: (TinoScreen) -> Unit) {
     ScreenColumn {
         TinoTopBar("Falar com o TINO") { onNavigate(TinoScreen.Home) }
         TinoEmptyState(TinoIcons.Conversation, "Faça uma pergunta", "Use sua voz para consultar vendas, estoque ou fiado.")
-        TinoPrimaryButton("COMEÇAR A FALAR") { onNavigate(TinoScreen.Voice) }
+        TinoPrimaryButton("VOLTAR PARA O TINO") { onNavigate(TinoScreen.Home) }
     }
 }
 
@@ -2539,9 +3364,13 @@ internal fun SyncDetailsScreen(pendingSyncCount: Int, onNavigate: (TinoScreen) -
         if (pendingSyncCount > 0) {
             TinoOfflineBanner("As alterações serão enviadas quando a conexão estiver disponível.")
         } else {
-            TinoEmptyState(TinoIcons.Synced, "Tudo em dia neste aparelho", "Não há alterações locais aguardando sincronização.")
+            TinoEmptyState(
+                TinoIcons.Synced,
+                "Tudo em dia neste aparelho",
+                "Não há alterações locais aguardando sincronização.",
+                illustrationState = TinoIllustrationState.SUCCESS,
+            )
         }
-        TinoSecondaryButton("VOLTAR ÀS CONFIGURAÇÕES") { onNavigate(TinoScreen.Settings) }
     }
 }
 
@@ -2550,26 +3379,144 @@ internal fun MoreScreen(onNavigate: (TinoScreen) -> Unit) {
     ScreenColumn(verticalSpacing = TinoSpacing.sm) {
         TinoTopBar("Mais") { onNavigate(TinoScreen.Home) }
         TinoSectionLabel("Operação")
-        TinoMenuCard(TinoIcons.Orders, "Pedidos", "Ver e gerenciar pedidos", { onNavigate(TinoScreen.Orders) })
-        TinoMenuCard(TinoIcons.Supplier, "Fornecedores", "Lista de fornecedores", { onNavigate(TinoScreen.Suppliers) })
-        TinoMenuCard(TinoIcons.Cart, "Comprar", "Fazer novas compras", { onNavigate(TinoScreen.PurchaseSuggestions) })
+        TinoMoreRow(TinoIcons.Orders, "Pedidos", "Ver e gerenciar pedidos") { onNavigate(TinoScreen.Orders) }
+        TinoMoreRow(TinoIcons.Supplier, "Fornecedores", "Lista de fornecedores") { onNavigate(TinoScreen.Suppliers) }
+        TinoMoreRow(TinoIcons.Cart, "Comprar", "Fazer novas compras") { onNavigate(TinoScreen.PurchaseSuggestions) }
+        TinoMoreRow(TinoIcons.Calendar, "Histórico de compras", "Compras, entradas e custos") { onNavigate(TinoScreen.PurchaseHistory) }
         Spacer(Modifier.height(TinoSpacing.sm))
         TinoSectionLabel("Meu comércio")
-        TinoMenuCard(TinoIcons.Calendar, "Resumo", "Visão geral do seu comércio", { onNavigate(TinoScreen.DailySummary) })
-        TinoMenuCard(TinoIcons.Document, "Notas", "Anotações e lembretes", { onNavigate(TinoScreen.FiscalFound) })
-        TinoMenuCard(TinoIcons.People, "Clientes", "Gerenciar seus clientes", { onNavigate(TinoScreen.Customers) })
+        TinoMoreRow(TinoIcons.Calendar, "Resumo", "Visão geral do seu comércio") { onNavigate(TinoScreen.DailySummary) }
+        TinoMoreRow(TinoIcons.Document, "Notas", "Anotações e lembretes") { onNavigate(TinoScreen.FiscalFound) }
+        TinoMoreRow(TinoIcons.People, "Clientes", "Gerenciar seus clientes") { onNavigate(TinoScreen.Customers) }
         Spacer(Modifier.height(TinoSpacing.sm))
         TinoSectionLabel("TINO")
-        TinoMenuCard(TinoIcons.Settings, "Configurações", "Ajustes do aplicativo", { onNavigate(TinoScreen.Settings) }, highlighted = true)
-        TinoMenuCard(TinoIcons.Offline, "Modo offline", "Trabalhar sem internet", { onNavigate(TinoScreen.Offline) })
+        TinoMoreRow(TinoIcons.Settings, "Configurações", "Ajustes do aplicativo") { onNavigate(TinoScreen.Settings) }
+        TinoMoreRow(TinoIcons.Document, "Diagnóstico do catálogo", "Ver logs e dados da sincronização") { onNavigate(TinoScreen.CatalogDiagnostics) }
+        TinoMoreRow(TinoIcons.Offline, "Modo offline", "Trabalhar sem internet") { onNavigate(TinoScreen.Offline) }
         if (BuildConfig.DEBUG) {
-            TinoMenuCard(TinoIcons.Document, "A2UI Actions", "Validar Agent Loop no device", { onNavigate(TinoScreen.A2uiValidation) })
-            TinoMenuCard(TinoIcons.Settings, "G3.11 Mutation Safety", "Confirmar, cancelar, replay e restart", { onNavigate(TinoScreen.G311MutationSafety) })
-            TinoMenuCard(TinoIcons.Settings, "G3.12 Memória", "Working, sessão, TTL e restart", { onNavigate(TinoScreen.G312Memory) })
-            TinoMenuCard(TinoIcons.Settings, "G4 Agent Loop", "Observe, replanejar, clarificar e proteger loop", { onNavigate(TinoScreen.G4AgentLoop) })
-            TinoMenuCard(TinoIcons.Settings, "G5 Business Memory", "Correção, promoção, demote, remove e restart", { onNavigate(TinoScreen.G5BusinessMemory) })
+            TinoMoreRow(TinoIcons.Document, "A2UI Actions", "Validar Agent Loop no device") { onNavigate(TinoScreen.A2uiValidation) }
+            TinoMoreRow(TinoIcons.Settings, "G3.11 Mutation Safety", "Confirmar, cancelar, replay e restart") { onNavigate(TinoScreen.G311MutationSafety) }
+            TinoMoreRow(TinoIcons.Settings, "G3.12 Memória", "Working, sessão, TTL e restart") { onNavigate(TinoScreen.G312Memory) }
+            TinoMoreRow(TinoIcons.Settings, "G4 Agent Loop", "Observe, replanejar, clarificar e proteger loop") { onNavigate(TinoScreen.G4AgentLoop) }
+            TinoMoreRow(TinoIcons.Settings, "G5 Business Memory", "Correção, promoção, demote, remove e restart") { onNavigate(TinoScreen.G5BusinessMemory) }
         }
     }
+}
+
+@Composable
+internal fun CatalogDiagnosticsScreen(
+    diagnostics: CatalogSyncDiagnostics?,
+    onNavigate: (TinoScreen) -> Unit,
+) {
+    ScreenColumn {
+        TinoTopBar("Diagnóstico do catálogo") { onNavigate(TinoScreen.More) }
+        if (diagnostics == null) {
+            TinoEmptyState(
+                TinoIcons.Document,
+                "Nenhuma sincronização registrada",
+                "Abra Estoque e toque em Atualizar catálogo para gerar os dados desta tela.",
+                illustrationState = TinoIllustrationState.EXPLAINING,
+            )
+        } else {
+            TinoCard {
+                Text("Status: ${diagnostics.status}", style = MaterialTheme.typography.titleMedium)
+                Text("Total retornado: ${diagnostics.total}", color = TinoMuted)
+                Text("Aceitos: ${diagnostics.accepted} · Rejeitados: ${diagnostics.rejected}", color = TinoMuted)
+                Text("Consulta limitada: ${if (diagnostics.possiblyPartial) "sim" else "não"}", color = TinoMuted)
+                diagnostics.errorMessage?.let { Text("Erro: $it", color = TinoOrange) }
+            }
+            TinoSectionLabel("Logs da última tentativa")
+            diagnostics.logs.forEach { entry ->
+                TinoCard {
+                    Text("${entry.status} · ${entry.step}", style = MaterialTheme.typography.labelLarge)
+                    Text(entry.detail, color = TinoMuted)
+                    Text(entry.timestamp.toString(), color = TinoMuted, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun PurchaseHistoryScreen(
+    onNavigate: (TinoScreen) -> Unit,
+    onLoad: suspend (String) -> PurchaseHistory,
+    onLoadDetail: suspend (String) -> PurchaseHistoryDetail,
+    onLoadInsights: suspend (String) -> List<PurchaseInsight>,
+) {
+    val scope = rememberCoroutineScope()
+    var period by remember { mutableStateOf("MONTH") }
+    var history by remember { mutableStateOf<PurchaseHistory?>(null) }
+    var detail by remember { mutableStateOf<PurchaseHistoryDetail?>(null) }
+    var insights by remember { mutableStateOf<List<PurchaseInsight>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(period) {
+        error = null
+        detail = null
+        runCatching {
+            history = onLoad(period)
+            insights = onLoadInsights(period)
+        }.onFailure { error = it.message ?: "Não foi possível carregar o histórico." }
+    }
+    ScreenColumn {
+            TinoTopBar("Histórico de compras") { onNavigate(TinoScreen.More) }
+        Row(horizontalArrangement = Arrangement.spacedBy(TinoSpacing.xs)) {
+            listOf("WEEK" to "Semana", "MONTH" to "Mês", "YEAR" to "Ano").forEach { (value, label) ->
+                if (period == value) TinoPrimaryButton(label, { period = value }, Modifier.weight(1f))
+                else TinoSecondaryButton(label, { period = value }, Modifier.weight(1f))
+            }
+        }
+        error?.let { TinoCard { Text(it, color = TinoRed) } }
+        history?.let { current ->
+            TinoCard {
+                Text("Resumo", style = MaterialTheme.typography.titleMedium)
+                MetricLine("Compras", current.purchaseCount.toString(), true, TinoGreenDark)
+                MetricLine("Itens recebidos", current.itemCount.toString(), true, TinoGreenDark)
+                MetricLine("Produtos novos", current.newProductCount.toString(), true, TinoOrange)
+                MetricLine("Total", "R$ ${current.total.toPlainString()}", true, TinoGreenDark)
+            }
+            current.purchases.forEach { purchase ->
+                TinoCard {
+                    Text(purchase.issuerName ?: "Fornecedor não informado", style = MaterialTheme.typography.titleMedium)
+                    Text("${purchase.confirmedAt.toLocalDate()} · R$ ${purchase.total?.toPlainString() ?: "não informado"}")
+                    Text("${purchase.itemCount} itens · ${purchase.newProductCount} novos")
+                    TextButton(onClick = {
+                        scope.launch {
+                            runCatching { onLoadDetail(purchase.receiptId) }
+                                .onSuccess { detail = it }
+                                .onFailure { error = it.message ?: "Não foi possível abrir a compra." }
+                        }
+                    }) { Text("Ver detalhes") }
+                }
+            }
+            if (insights.isNotEmpty()) {
+                TinoCard {
+                    Text("O TINO percebeu", style = MaterialTheme.typography.titleMedium)
+                    insights.forEach { insight -> Text(insight.message) }
+                }
+            }
+        }
+        detail?.let { selected ->
+            TinoCard {
+                Text("Detalhes da compra", style = MaterialTheme.typography.titleMedium)
+                Text("Chave: ${selected.accessKey}", style = MaterialTheme.typography.bodySmall)
+                selected.items.forEach { item ->
+                    Text("${item.lineNumber}. ${item.description} · ${item.stockQuantity ?: item.quantity ?: "—"} ${item.unit ?: ""} · ${item.matchStatus}")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TinoMoreRow(
+    icon: ImageVector,
+    label: String,
+    detail: String,
+    onClick: () -> Unit,
+) {
+    TinoMenuRow(icon, label, onClick, detail)
+    HorizontalDivider(color = TinoGreenBorder.copy(alpha = 0.55f))
 }
 
 @Composable
@@ -2585,17 +3532,16 @@ internal fun SettingsScreen(
             "Meu negócio",
             onOpenBusinessProfile,
         )
-        Text("Dados e segurança", style = MaterialTheme.typography.titleMedium)
-        TinoMenuRow(TinoIcons.Synced, "Backup e sincronização") { onNavigate(TinoScreen.SyncDetails) }
-        TinoMenuRow(TinoIcons.Offline, "Trabalhar sem internet") { onNavigate(TinoScreen.Offline) }
-        Text("Recursos do aparelho", style = MaterialTheme.typography.titleMedium)
+        Text("Dados e segurança", modifier = Modifier.tinoOccupiedBounds("settings-security"), style = MaterialTheme.typography.titleMedium)
+        TinoMenuRow(TinoIcons.Synced, "Backup e sincronização", onClick = { onNavigate(TinoScreen.SyncDetails) })
+        TinoMenuRow(TinoIcons.Offline, "Trabalhar sem internet", onClick = { onNavigate(TinoScreen.Offline) })
+        Text("Recursos do aparelho", modifier = Modifier.tinoOccupiedBounds("settings-device"), style = MaterialTheme.typography.titleMedium)
         TinoCard {
             Text("Som, voz, impressora e acessibilidade", fontWeight = FontWeight.SemiBold)
             Text("Essas opções serão configuradas quando os recursos estiverem disponíveis neste aparelho.", color = TinoMuted)
         }
-        Text("Notas fiscais", style = MaterialTheme.typography.titleMedium)
-        TinoMenuRow(TinoIcons.Document, "Importar nota fiscal") { onNavigate(TinoScreen.FiscalFound) }
-        TinoSecondaryButton("VOLTAR PARA MAIS") { onNavigate(TinoScreen.More) }
+        Text("Notas fiscais", modifier = Modifier.tinoOccupiedBounds("settings-fiscal"), style = MaterialTheme.typography.titleMedium)
+        TinoMenuRow(TinoIcons.Document, "Importar nota fiscal", onClick = { onNavigate(TinoScreen.FiscalFound) })
     }
 }
 
@@ -2644,7 +3590,7 @@ internal fun BusinessProfileSettingsScreen(
         Text("Ative apenas o que faz sentido para o seu dia a dia.", color = TinoMuted)
         if (!customize) {
             Text("Preset atual: ${vertical.displayName()}", fontWeight = FontWeight.SemiBold)
-            TextButton(onClick = { customize = true }) { Text("PERSONALIZAR RECURSOS") }
+            TinoTextAction("PERSONALIZAR RECURSOS", { customize = true }, color = TinoGreenDark)
         } else {
             selectableModules.forEach { module ->
                 TinoFilterChip(
@@ -2717,7 +3663,7 @@ internal fun BusinessProfileSettingsScreen(
                     else configurationError = profileConfigurationError(failure)
                 }
             }
-        }, Modifier, enabled = !submitting)
+        }, Modifier, enabled = !submitting, loading = submitting)
         TinoSecondaryButton("CANCELAR", { onNavigate(TinoScreen.Settings) }, Modifier, enabled = !submitting)
     }
 }
@@ -2750,34 +3696,51 @@ internal fun OfflineScreen(pendingSyncCount: Int, onNavigate: (TinoScreen) -> Un
             )
         }
         Text("Vendas, estoque e fiado continuam disponíveis neste aparelho.", color = TinoMuted)
-        TinoPrimaryButton("VOLTAR PARA O TINO") { onNavigate(TinoScreen.Home) }
+        TinoPrimaryButton("VER SINCRONIZAÇÃO") { onNavigate(TinoScreen.SyncDetails) }
     }
 }
 
 @Composable
-internal fun VoiceErrorScreen(onNavigate: (TinoScreen) -> Unit) = ChoiceFlowScreen("Não entendi direito", TinoIcons.Error, "Não consegui transformar o que ouvi em uma operação segura.", "FALAR DE NOVO", "FAZER MANUALMENTE", onNavigate, TinoScreen.QuickSale, TinoScreen.Voice)
+internal fun VoiceErrorScreen(onNavigate: (TinoScreen) -> Unit) = ChoiceFlowScreen("Não entendi direito", TinoIcons.Error, "Não consegui transformar o que ouvi em uma operação segura. Você pode tentar pelo botão de voz na tela inicial ou continuar manualmente.", "VOLTAR AO TINO", "FAZER MANUALMENTE", onNavigate, TinoScreen.QuickSale, TinoScreen.Home)
 
 @Composable
 internal fun AmbiguityScreen(onNavigate: (TinoScreen) -> Unit) {
     ScreenColumn {
-        TinoTopBar("Escolher produto") { onNavigate(TinoScreen.Voice) }
+        TinoTopBar("Escolher produto") { onNavigate(TinoScreen.Home) }
         TinoCard {
             Icon(TinoIcons.Search, contentDescription = null, tint = TinoGreen, modifier = Modifier.size(TinoSize.iconLarge))
             Text("Encontrei mais de um produto parecido.", style = MaterialTheme.typography.titleMedium)
             Text("Fale o nome completo ou escolha manualmente na venda.", color = TinoMuted)
         }
-        TinoSecondaryButton("FALAR NOVAMENTE") { onNavigate(TinoScreen.Voice) }
+        TinoSecondaryButton("VOLTAR AO TINO") { onNavigate(TinoScreen.Home) }
         TinoPrimaryButton("ABRIR VENDA MANUAL") { onNavigate(TinoScreen.QuickSale) }
     }
 }
 
 @Composable
-internal fun NotificationScreen(products: List<ProductSummary>, onNavigate: (TinoScreen) -> Unit) {
-    val attention = products.filter { it.stockQuantity in 0..6 }
+internal fun NotificationScreen(
+    products: List<ProductSummary>,
+    attentionItems: List<AttentionRecord> = emptyList(),
+    onNavigate: (TinoScreen) -> Unit,
+) {
+    val attention = products.filter { it.stockTracked && it.stockQuantity in 0..6 }
     ScreenColumn {
         TinoTopBar("Avisos do TINO") { onNavigate(TinoScreen.Home) }
-        if (attention.isEmpty()) {
-            TinoEmptyState(TinoIcons.Success, "Nenhum aviso novo", "Quando houver algo importante, o TINO avisará por aqui.")
+        if (attentionItems.isNotEmpty()) {
+            attentionItems.forEach { item ->
+                TinoInsightCard(
+                    title = item.title,
+                    message = item.explanation,
+                    onView = { onNavigate(TinoScreen.Home) },
+                )
+            }
+        } else if (attention.isEmpty()) {
+            TinoEmptyState(
+                TinoIcons.Success,
+                "Nenhum aviso novo",
+                "Quando houver algo importante, o TINO avisará por aqui.",
+                illustrationState = TinoIllustrationState.SUCCESS,
+            )
         } else {
             attention.forEach { product ->
                 TinoInsightCard(
@@ -2814,7 +3777,7 @@ internal fun CorrectionScreen(onNavigate: (TinoScreen) -> Unit) {
             TinoQuantitySelector(quantity, { quantity = (quantity - 1).coerceAtLeast(0) }, { quantity++ })
         }
         Spacer(Modifier.height(TinoSpacing.xl))
-        TinoSecondaryButton("FALAR NOVAMENTE") { onNavigate(TinoScreen.Voice) }
+        TinoSecondaryButton("VOLTAR AO TINO") { onNavigate(TinoScreen.Home) }
         TinoPrimaryButton("SALVAR ALTERAÇÃO") { onNavigate(TinoScreen.Completed) }
     }
 }
@@ -2859,17 +3822,31 @@ internal fun ChoiceFlowScreen(title: String, icon: ImageVector, body: String, se
 }
 
 @Composable
-internal fun PaymentChoice(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().height(TinoSize.buttonHeight).clickable(enabled = enabled, onClick = onClick),
-        shape = com.tino.app.ui.theme.TinoShapes.small,
-        colors = CardDefaults.cardColors(containerColor = if (enabled) TinoGreenTint else TinoSurface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, TinoGreenBorder),
-        elevation = CardDefaults.cardElevation(defaultElevation = TinoSize.cardElevation),
+internal fun PaymentChoice(
+    icon: ImageVector,
+    label: String,
+    enabled: Boolean = true,
+    loading: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val choiceEnabled = enabled && !loading
+    TinoCardSurface(
+        modifier = Modifier.tinoInteractiveBounds("payment-choice:" + label),
+        status = if (choiceEnabled) TinoCardStatus.SUCCESS else TinoCardStatus.NEUTRAL,
+        onClick = if (choiceEnabled) onClick else null,
+        description = "Forma de pagamento: $label",
     ) {
-        Row(Modifier.fillMaxSize().padding(horizontal = TinoSpacing.lg), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(TinoSpacing.md)) {
-            Icon(icon, contentDescription = label, tint = if (enabled) TinoGreen else TinoMuted)
-            Text(label, fontWeight = FontWeight.Bold, color = if (enabled) TinoInk else TinoMuted)
+        Row(Modifier.fillMaxWidth().heightIn(min = TinoSize.minTouch), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(TinoSpacing.md)) {
+            Icon(icon, contentDescription = label, tint = if (choiceEnabled) TinoGreen else TinoMuted)
+            Text(label, fontWeight = FontWeight.Bold, color = if (choiceEnabled) TinoInk else TinoMuted)
+            if (loading) {
+                Spacer(Modifier.weight(1f))
+                CircularProgressIndicator(
+                    modifier = Modifier.size(TinoSize.iconSmall),
+                    color = TinoGreen,
+                    strokeWidth = TinoSize.progressStrokeWidth,
+                )
+            }
         }
     }
 }
@@ -2880,8 +3857,23 @@ internal fun ScreenColumn(
     verticalSpacing: Dp = TinoSpacing.lg,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val scrollState = rememberScrollState()
+    val scrollTelemetry = LocalTinoScrollTelemetry.current
+    LaunchedEffect(scrollState) {
+        snapshotFlow { scrollState.value }.collect { offset ->
+            scrollTelemetry.offsetPx = offset
+        }
+    }
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = TinoSpacing.screen, vertical = TinoSpacing.lg),
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(
+                start = TinoSpacing.screen,
+                top = TinoSpacing.lg,
+                end = TinoSpacing.screen,
+                bottom = TinoSpacing.lg,
+            ),
         horizontalAlignment = horizontalAlignment,
         verticalArrangement = Arrangement.spacedBy(verticalSpacing),
         content = content,
@@ -2928,7 +3920,7 @@ internal fun PreviewFrame(content: @Composable () -> Unit) {
 @Preview(name = "UI-001 Splash", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi001() = PreviewFrame { TinoSplashScreen(onFinished = {}) }
 @Preview(name = "UI-002 First access", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi002() = PreviewFrame { FirstAccessScreen({ _, _, _, _, _ -> }, {}) }
+@Composable private fun PreviewUi002() = PreviewFrame { FirstAccessScreen({ _, _, _, _, _, _ -> }, {}) }
 @Preview(name = "UI-003 Restore store", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi003() = PreviewFrame { RestoreStoreScreen({}) }
 @Preview(name = "UI-004 Home", showBackground = true, widthDp = 412, heightDp = 915)
@@ -2946,7 +3938,7 @@ internal fun PreviewFrame(content: @Composable () -> Unit) {
     )
 }
 @Preview(name = "UI-005 Voice listening", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi005() = PreviewFrame { VoiceScreen(onNavigate = {}) }
+@Composable private fun PreviewUi005() = PreviewFrame { AskTinoScreen(onNavigate = {}) }
 @Preview(name = "UI-006 Interpretation", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi006() = PreviewFrame { UnderstoodScreen {} }
 @Preview(name = "UI-007 Correction", showBackground = true, widthDp = 412, heightDp = 915)
@@ -2962,7 +3954,7 @@ internal fun PreviewFrame(content: @Composable () -> Unit) {
 @Preview(name = "UI-012 Credit confirmation", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi012() = PreviewFrame { ConfirmCreditScreen(demoCustomers().first(), listOf(SaleLine(demoProducts().first(), 1)), {}, { _, _, _ -> Result.success(Unit) }, {}) }
 @Preview(name = "UI-013 Credit list", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi013() = PreviewFrame { CreditListScreen(demoCustomers(), {}, { _, _ -> }, {}) }
+@Composable private fun PreviewUi013() = PreviewFrame { CreditListScreen(demoCustomers(), {}, { _, _ -> Result.success(Unit) }, {}) }
 @Preview(name = "UI-014 Customer account", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi014() = PreviewFrame { CustomerAccountScreen(demoCustomers().first(), null, {}) }
 @Preview(name = "UI-015 Credit payment", showBackground = true, widthDp = 412, heightDp = 915)
@@ -2982,9 +3974,11 @@ internal fun PreviewFrame(content: @Composable () -> Unit) {
 @Preview(name = "UI-022 Fiscal review", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi022() = PreviewFrame { FiscalReviewScreen({}, false) }
 @Preview(name = "UI-023 Purchase suggestions", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi023() = PreviewFrame { PurchaseSuggestionsScreen {} }
+@Composable private fun PreviewUi023() = PreviewFrame {
+    PurchaseSuggestionsScreen(demoProducts(), emptyList(), { _, _, _, _, _ -> Result.success(Unit) }, {})
+}
 @Preview(name = "UI-024 Supplier order", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi024() = PreviewFrame { SupplierOrderScreen {} }
+@Composable private fun PreviewUi024() = PreviewFrame { SupplierOrderScreen(emptyList(), emptyList(), { Result.success(Unit) }, {}) }
 @Preview(name = "UI-025 Suppliers", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi025() = PreviewFrame { SuppliersScreen(emptyList(), {}, { _, _ -> Result.success(Unit) }) }
 @Preview(name = "UI-026 Orders", showBackground = true, widthDp = 412, heightDp = 915)
@@ -2996,7 +3990,7 @@ internal fun PreviewFrame(content: @Composable () -> Unit) {
 @Preview(name = "UI-029 Delivery", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi029() = PreviewFrame { DeliveryScreen(null, {}) }
 @Preview(name = "UI-030 Insights", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi030() = PreviewFrame { InsightsScreen(demoProducts(), {}) }
+@Composable private fun PreviewUi030() = PreviewFrame { InsightsScreen(demoProducts(), onNavigate = {}) }
 @Preview(name = "UI-031 Daily summary", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi031() = PreviewFrame { DailySummaryScreen(84750, 27, 12000, {}) }
 @Preview(name = "UI-032 TINO conversation", showBackground = true, widthDp = 412, heightDp = 915)
@@ -3014,4 +4008,4 @@ internal fun PreviewFrame(content: @Composable () -> Unit) {
 @Preview(name = "UI-038 Ambiguity", showBackground = true, widthDp = 412, heightDp = 915)
 @Composable private fun PreviewUi038() = PreviewFrame { AmbiguityScreen {} }
 @Preview(name = "UI-039 Notification", showBackground = true, widthDp = 412, heightDp = 915)
-@Composable private fun PreviewUi039() = PreviewFrame { NotificationScreen(demoProducts(), {}) }
+@Composable private fun PreviewUi039() = PreviewFrame { NotificationScreen(demoProducts(), onNavigate = {}) }

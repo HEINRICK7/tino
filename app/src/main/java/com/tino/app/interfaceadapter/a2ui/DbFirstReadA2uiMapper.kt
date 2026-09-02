@@ -43,6 +43,8 @@ class DbFirstReadA2uiMapper @Inject constructor() {
                 val type = when (response.capability) {
                     AgentCapability.GET_PRODUCT_STOCK -> TinoA2UiComponentCatalog.PRODUCT_STOCK
                     AgentCapability.GET_PRODUCT_PRICE -> TinoA2UiComponentCatalog.PRODUCT_PRICE
+                    AgentCapability.REPLENISHMENT_QUERY -> TinoA2UiComponentCatalog.PRODUCT_STOCK
+                    AgentCapability.LIST_PRODUCTS -> TinoA2UiComponentCatalog.PRODUCT_STOCK
                     else -> TinoA2UiComponentCatalog.PRODUCT_LIST
                 }
                 Quad(
@@ -77,8 +79,50 @@ class DbFirstReadA2uiMapper @Inject constructor() {
                         primaryText = "Cliente",
                         secondaryText = item.phone?.takeIf { it.isNotBlank() },
                         context = "Cadastro",
-                        supportingText = item.phone?.takeIf { it.isNotBlank() } ?: "Sem telefone",
+                        supportingText = if (item.phone.isNullOrBlank()) "Sem telefone" else null,
+                        status = A2uiVisualStatus.INFO,
                         iconKey = "customer",
+                        actionId = item.id,
+                    )
+                },
+                result.value.emptyMessage,
+                result.value.dataSource,
+            )
+            is DbFirstReadResult.CustomerContact -> Quad(
+                TinoA2UiComponentCatalog.CUSTOMER_CONTACT,
+                "Contato do cliente",
+                listOf(
+                    A2uiListItem(
+                        title = result.value.customerName,
+                        primaryText = result.value.phone?.takeIf { it.isNotBlank() } ?: "Sem telefone",
+                        secondaryText = null,
+                        context = "Cliente",
+                        supportingText = if (result.value.phone.isNullOrBlank()) {
+                            "Nenhum telefone cadastrado"
+                        } else {
+                            "Telefone cadastrado"
+                        },
+                        status = A2uiVisualStatus.INFO,
+                        iconKey = "customer",
+                        actionId = result.value.customerId,
+                    ),
+                ),
+                null,
+                result.value.dataSource,
+            )
+            is DbFirstReadResult.Suppliers -> Quad(
+                TinoA2UiComponentCatalog.SUPPLIER_SUMMARY,
+                "Fornecedores cadastrados",
+                result.value.items.map { item ->
+                    A2uiListItem(
+                        title = item.name,
+                        primaryText = "Fornecedor",
+                        secondaryText = item.phone?.takeIf { it.isNotBlank() },
+                        context = "Cadastro",
+                        supportingText = if (item.phone.isNullOrBlank()) "Sem telefone" else null,
+                        status = A2uiVisualStatus.INFO,
+                        iconKey = "supplier",
+                        actionId = item.id,
                     )
                 },
                 result.value.emptyMessage,
@@ -94,8 +138,9 @@ class DbFirstReadA2uiMapper @Inject constructor() {
                         secondaryText = null,
                         context = "Fiado",
                         supportingText = "Em aberto",
-                        status = A2uiVisualStatus.WARNING,
-                        iconKey = "customer",
+                        status = A2uiVisualStatus.CREDIT,
+                        iconKey = "credit",
+                        actionId = item.customerId,
                     )
                 },
                 result.value.emptyMessage,
@@ -112,7 +157,8 @@ class DbFirstReadA2uiMapper @Inject constructor() {
                         context = "Fiado",
                         supportingText = "Atrasado há ${item.daysOverdue} dias",
                         status = A2uiVisualStatus.ERROR,
-                        iconKey = "customer",
+                        iconKey = "credit",
+                        actionId = item.customerId,
                     )
                 },
                 result.value.emptyMessage,
@@ -144,14 +190,15 @@ class DbFirstReadA2uiMapper @Inject constructor() {
         secondaryText = secondaryText,
         context = context,
         supportingText = stockSupportingText(),
-        status = if (stockQuantity <= 0) A2uiVisualStatus.WARNING else A2uiVisualStatus.NORMAL,
+        status = if (!stockTracked || stockQuantity > 0) A2uiVisualStatus.SUCCESS else A2uiVisualStatus.WARNING,
         iconKey = "inventory",
     )
 
     private fun ProductListItem.stockText(): String =
-        "$stockQuantity $unit${if (stockQuantity == 1) "" else "s"}"
+        if (stockTracked) "$stockQuantity $unit${if (stockQuantity == 1) "" else "s"}" else "Feito sob demanda"
 
     private fun ProductListItem.stockSupportingText(): String = when {
+        !stockTracked -> "Sem controle de estoque"
         stockQuantity <= 0 -> "Estoque zerado"
         stockQuantity <= 6 -> "Estoque baixo"
         else -> "Disponível"

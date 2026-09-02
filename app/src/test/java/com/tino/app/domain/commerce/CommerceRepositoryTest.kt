@@ -7,6 +7,7 @@ import com.tino.app.core.common.IdentityProvider
 import com.tino.app.core.database.TinoDatabase
 import com.tino.app.core.database.CreditEntryEntity
 import com.tino.app.core.database.CreditEntryType
+import com.tino.app.core.database.ProductEntity
 import com.tino.app.core.sync.CommerceSnapshotRepository
 import com.tino.app.core.sync.RemoteEventApplier
 import com.tino.app.core.sync.SyncScheduler
@@ -110,6 +111,26 @@ class CommerceRepositoryTest {
         assertEquals(21, database.stockMovementDao().balance(productId))
         assertEquals(1, database.purchaseDao().all().size)
         assertEquals(5, database.domainEventDao().all().size)
+    }
+
+    @Test
+    fun madeToOrderSaleDoesNotRequireOrChangeStock() = runBlocking {
+        database.productDao().insert(ProductEntity("made", "Bolo", 5_000, "un", 1, null, false))
+
+        repository.registerSale("made", 3)
+
+        assertEquals(0, database.stockMovementDao().balance("made"))
+        assertEquals(1, database.saleDao().all().size)
+    }
+
+    @Test
+    fun madeToOrderProductCannotReceiveStock() = runBlocking {
+        database.productDao().insert(ProductEntity("made", "Bolo", 5_000, "un", 1, null, false))
+
+        val failure = runCatching { repository.registerStockReceipt("made", 1, 3_000) }.exceptionOrNull()
+
+        assertEquals("Produto sob demanda não possui estoque.", failure?.message)
+        assertEquals(0, database.purchaseDao().all().size)
     }
 
     @Test
@@ -413,6 +434,28 @@ class CommerceRepositoryTest {
     }
 
     @Test
+    fun priceUpdateDispatcherExecutesTheCanonicalUseCaseAfterConfirmation() = runBlocking {
+        repository.createProduct("Café Maratá", 850, 0)
+        val productId = database.productDao().all().single().id
+        val dispatcher = CommerceToolDispatcher(repository)
+        val call = ToolCall(
+            name = CommerceToolName.CHANGE_PRODUCT_PRICE,
+            arguments = mapOf("product" to "Café Maratá", "new_price_cents" to "875"),
+        )
+
+        val preview = dispatcher.preview(call)
+
+        assertTrue(preview.detail.contains("R$ 8,50"))
+        assertTrue(preview.detail.contains("R$ 8,75"))
+        assertEquals(850L, database.productDao().findById(productId)?.priceCents)
+
+        dispatcher.execute(call, confirmed = true)
+
+        assertEquals(875L, database.productDao().findById(productId)?.priceCents)
+        assertTrue(database.domainEventDao().all().any { it.type == "product.price.changed" })
+    }
+
+    @Test
     fun creditCommandPreviewShowsConsequenceBeforeMutation() = runBlocking {
         repository.createProduct("Café Maratá", 800, 10)
         val productId = database.productDao().all().single().id
@@ -443,6 +486,29 @@ class CommerceRepositoryTest {
         dispatcher.execute(call, confirmed = true)
         assertEquals(8, database.stockMovementDao().balance(productId))
         assertEquals(1600L, database.creditDao().balance(customerId))
+    }
+
+    @Test
+    fun customerCreationDispatcherPersistsOnlyAfterConfirmedExecution() = runBlocking {
+        val dispatcher = CommerceToolDispatcher(repository)
+        val call = ToolCall(
+            name = CommerceToolName.CREATE_CUSTOMER,
+            arguments = mapOf("name" to "Maria Lina", "phone" to "86999990000"),
+        )
+
+        val preview = dispatcher.preview(call)
+
+        assertEquals("Cadastrar cliente?", preview.title)
+        assertTrue(preview.detail.contains("Maria Lina"))
+        assertTrue(preview.detail.contains("Telefone: 86999990000"))
+        assertTrue(database.customerDao().all().isEmpty())
+
+        dispatcher.execute(call, confirmed = true)
+
+        val created = database.customerDao().all().single()
+        assertEquals("Maria Lina", created.name)
+        assertEquals("86999990000", created.phone)
+        assertTrue(database.domainEventDao().all().any { it.type == "customer.created" })
     }
 
     @Test
@@ -554,6 +620,257 @@ class CommerceRepositoryTest {
         assertEquals(-5_000L, database.creditDao().findById("payment-original")?.amountCents)
         assertEquals(-4_000L, database.creditDao().findById("payment-corrected")?.amountCents)
         assertEquals(1, database.domainEventDao().all().count { it.type == "credit.payment.reversed" })
+    }
+
+    @Test
+    fun creditAdjustmentAppendsSignedEventWithoutChangingOriginalEntries() = runBlocking {
+        repository.createCustomer("Maria")
+        val customerId = database.customerDao().all().single().id
+        repository.registerCreditByAmount(customerId, 10_000, operationId = "opening-adjustment")
+
+        val provenance = LedgerProvenance(
+            source = LedgerSourceType.VOICE,
+            actor = LedgerActorType.AGENT,
+            transcript = "desconta cinco reais da conta da Maria",
+            agentExecutionId = "agent-adjustment-1",
+            createdAtEpochMs = 123L,
+        )
+        repository.registerCreditAdjustment(
+            customerId = customerId,
+            amountCents = -500,
+            reason = "Desconto autorizado pelo comerciante",
+            operationId = "adjustment-maria",
+            provenance = provenance,
+        )
+        repository.registerCreditAdjustment(
+            customerId = customerId,
+            amountCents = -500,
+            reason = "Desconto autorizado pelo comerciante",
+            operationId = "adjustment-maria",
+            provenance = provenance,
+        )
+
+        val adjustment = database.creditDao().findById("adjustment-maria")
+        assertEquals(-500L, adjustment?.amountCents)
+        assertEquals(SharedLedgerEventType.ADJUSTMENT.name, adjustment?.ledgerType)
+        assertEquals("Desconto autorizado pelo comerciante", adjustment?.reason)
+        assertEquals(provenance, adjustment?.provenance?.let(LedgerProvenanceCodec::decode))
+        assertEquals(9_500L, database.creditDao().balance(customerId))
+        assertEquals(10_000L, database.creditDao().findById("opening-adjustment")?.amountCents)
+        assertEquals(1, database.domainEventDao().all().count { it.type == "credit.adjustment.created" })
+    }
+
+    @Test
+    fun creditAdjustmentCannotMakeBalanceNegative() = runBlocking {
+        repository.createCustomer("Maria")
+        val customerId = database.customerDao().all().single().id
+        repository.registerCreditByAmount(customerId, 1_000, operationId = "opening-adjustment-limit")
+
+        var rejected = false
+        try {
+            repository.registerCreditAdjustment(
+                customerId = customerId,
+                amountCents = -1_001,
+                reason = "Ajuste inválido",
+                operationId = "adjustment-invalid",
+            )
+        } catch (error: IllegalStateException) {
+            rejected = error.message?.contains("saldo negativo") == true
+        }
+
+        assertTrue(rejected)
+        assertEquals(1_000L, database.creditDao().balance(customerId))
+        assertTrue(database.creditDao().findById("adjustment-invalid") == null)
+    }
+
+    @Test
+    fun disputeAppendsZeroValueEventAndDoesNotChangeBalance() = runBlocking {
+        repository.createCustomer("Maria")
+        val customerId = database.customerDao().all().single().id
+        repository.registerCreditByAmount(customerId, 10_000, operationId = "opening-dispute")
+
+        val disputeId = repository.disputeCreditEntry(
+            customerId = customerId,
+            referencedEntryId = "opening-dispute",
+            reason = "Cliente contesta o lançamento",
+            operationId = "dispute-maria",
+        )
+        val retryId = repository.disputeCreditEntry(
+            customerId = customerId,
+            referencedEntryId = "opening-dispute",
+            reason = "Cliente contesta o lançamento",
+            operationId = "dispute-maria",
+        )
+
+        val dispute = database.creditDao().findById(disputeId)
+        assertEquals("dispute-maria", retryId)
+        assertEquals(0L, dispute?.amountCents)
+        assertEquals(SharedLedgerEventType.DISPUTE.name, dispute?.ledgerType)
+        assertEquals("opening-dispute", dispute?.referenceId)
+        assertEquals(10_000L, database.creditDao().balance(customerId))
+        assertEquals(1, database.domainEventDao().all().count { it.type == "credit.entry.disputed" })
+        assertTrue(
+            SharedLedgerProjector.project(
+                customerId,
+                database.creditDao().all().map(SharedLedgerProjector::fromCreditEntry),
+            ).disputedEventIds.contains("opening-dispute"),
+        )
+    }
+
+    @Test
+    fun remoteLedgerEventsPreserveSemanticTypeReasonAndProvenance() = runBlocking {
+        repository.createCustomer("Maria")
+        val customerId = database.customerDao().all().single().id
+        repository.registerCreditByAmount(customerId, 10_000, operationId = "opening-remote-ledger")
+        val provenance = LedgerProvenance(
+            source = LedgerSourceType.VOICE,
+            actor = LedgerActorType.AGENT,
+            transcript = "ajusta a conta da Maria",
+            agentExecutionId = "agent-remote-ledger-1",
+            createdAtEpochMs = 456L,
+        )
+        repository.registerCreditAdjustment(
+            customerId = customerId,
+            amountCents = -500,
+            reason = "Pagamento confirmado fora do caixa",
+            operationId = "adjustment-remote-ledger",
+            provenance = provenance,
+        )
+        repository.disputeCreditEntry(
+            customerId = customerId,
+            referencedEntryId = "opening-remote-ledger",
+            reason = "Contestação enviada pelo cliente",
+            operationId = "dispute-remote-ledger",
+            provenance = provenance,
+        )
+
+        val remote = Room.inMemoryDatabaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            TinoDatabase::class.java,
+        ).allowMainThreadQueries().build()
+        try {
+            val applier = RemoteEventApplier(remote)
+            database.domainEventDao().all()
+                .filter { it.type == "credit.adjustment.created" || it.type == "credit.entry.disputed" }
+                .forEach { applier.applyIfNew(it) }
+
+            val adjustment = remote.creditDao().findById("adjustment-remote-ledger")
+            val dispute = remote.creditDao().findById("dispute-remote-ledger")
+            assertEquals(SharedLedgerEventType.ADJUSTMENT.name, adjustment?.ledgerType)
+            assertEquals("Pagamento confirmado fora do caixa", adjustment?.reason)
+            assertEquals(provenance, adjustment?.provenance?.let(LedgerProvenanceCodec::decode))
+            assertEquals(SharedLedgerEventType.DISPUTE.name, dispute?.ledgerType)
+            assertEquals("opening-remote-ledger", dispute?.referenceId)
+            assertEquals(0L, dispute?.amountCents)
+        } finally {
+            remote.close()
+        }
+    }
+
+    @Test
+    fun settlementClosesBalanceWithoutDeletingLedgerHistory() = runBlocking {
+        repository.createCustomer("Maria")
+        val customerId = database.customerDao().all().single().id
+        repository.registerCreditByAmount(customerId, 10_000, operationId = "opening-settlement")
+        repository.registerCreditPayment(customerId, 2_500, PaymentMethod.PIX, "payment-settlement")
+
+        val settlementId = repository.settleCredit(
+            customerId = customerId,
+            reason = "Quitação acordada com a cliente",
+            operationId = "settlement-maria",
+        )
+        val retryId = repository.settleCredit(
+            customerId = customerId,
+            reason = "Quitação acordada com a cliente",
+            operationId = "settlement-maria",
+        )
+
+        val settlement = database.creditDao().findById(settlementId)
+        assertEquals("settlement-maria", retryId)
+        assertEquals(-7_500L, settlement?.amountCents)
+        assertEquals(SharedLedgerEventType.SETTLEMENT.name, settlement?.ledgerType)
+        assertEquals(0L, database.creditDao().balance(customerId))
+        assertEquals(3, database.creditDao().all().size)
+        assertEquals(1, database.domainEventDao().all().count { it.type == "credit.settled" })
+
+        val timeline = TemporalCreditService.buildTimeline(
+            customerId = customerId,
+            customerName = "Maria",
+            entries = database.creditDao().all(),
+            now = System.currentTimeMillis(),
+            zone = java.time.ZoneId.systemDefault(),
+        )
+        assertEquals(0L, timeline.currentBalanceCents)
+        assertEquals(0L, timeline.openCents)
+        assertEquals(1, timeline.payments.size)
+        assertEquals(3, timeline.ledgerEvents.size)
+        assertTrue(timeline.ledgerEvents.any { it.type == SharedLedgerEventType.PAYMENT })
+        assertTrue(timeline.ledgerEvents.any { it.type == SharedLedgerEventType.SETTLEMENT })
+    }
+
+    @Test
+    fun remoteSettlementPreservesClosedBalanceAndSemanticMetadata() = runBlocking {
+        repository.createCustomer("Maria")
+        val customerId = database.customerDao().all().single().id
+        repository.registerCreditByAmount(customerId, 4_000, operationId = "opening-remote-settlement")
+        val provenance = LedgerProvenance(
+            source = LedgerSourceType.MANUAL_UI,
+            actor = LedgerActorType.MERCHANT,
+            createdAtEpochMs = 789L,
+        )
+        repository.settleCredit(
+            customerId = customerId,
+            reason = "Quitação registrada no caixa",
+            operationId = "settlement-remote",
+            provenance = provenance,
+        )
+        val events = database.domainEventDao().all()
+        val settlementEvent = events.single { it.type == "credit.settled" }
+        val openingEvent = events.single { it.type == "credit.receivable.created" }
+
+        val remote = Room.inMemoryDatabaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            TinoDatabase::class.java,
+        ).allowMainThreadQueries().build()
+        try {
+            val applier = RemoteEventApplier(remote)
+            applier.applyIfNew(openingEvent)
+            applier.applyIfNew(settlementEvent)
+
+            val settlement = remote.creditDao().findById("settlement-remote")
+            assertEquals(-4_000L, settlement?.amountCents)
+            assertEquals(SharedLedgerEventType.SETTLEMENT.name, settlement?.ledgerType)
+            assertEquals("Quitação registrada no caixa", settlement?.reason)
+            assertEquals(provenance, settlement?.provenance?.let(LedgerProvenanceCodec::decode))
+            assertEquals(0L, remote.creditDao().balance(customerId))
+        } finally {
+            remote.close()
+        }
+    }
+
+    @Test
+    fun sharedLedgerReadApiProjectsEventsPerCustomerWithoutCrossingBoundaries() = runBlocking {
+        repository.createCustomer("Maria")
+        repository.createCustomer("João")
+        val customers = database.customerDao().all().associateBy { it.name }
+        val mariaId = customers.getValue("Maria").id
+        val joaoId = customers.getValue("João").id
+        repository.registerCreditByAmount(mariaId, 10_000, operationId = "ledger-maria")
+        repository.registerCreditPayment(mariaId, 2_000, PaymentMethod.PIX, "ledger-maria-payment")
+        repository.registerCreditByAmount(joaoId, 3_000, operationId = "ledger-joao")
+
+        val maria = repository.sharedLedgerProjection(mariaId)
+        val statement = repository.sharedLedgerStatement(mariaId)
+        val all = repository.allSharedLedgerProjections().associateBy { it.customerId }
+
+        assertEquals(8_000L, maria.balanceCents)
+        assertEquals(listOf("ledger-maria", "ledger-maria-payment"), maria.events.map { it.id })
+        assertEquals("Maria", statement.customerName)
+        assertEquals(8_000L, statement.balanceCents)
+        assertEquals(maria.events.map { it.id }, statement.entries.map { it.id })
+        assertEquals(8_000L, all.getValue(mariaId).balanceCents)
+        assertEquals(3_000L, all.getValue(joaoId).balanceCents)
+        assertEquals(emptySet<String>(), all.getValue(joaoId).disputedEventIds)
     }
 
     @Test

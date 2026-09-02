@@ -26,15 +26,14 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Android ASR adapter. It prefers the device recognizer and offline mode, then sends only
- * committed text to the Gemma boundary. Gemma remains responsible for understanding fields
- * and commands, not for pretending to be an audio decoder.
+ * Android ASR adapter. It prefers the device recognizer and offline mode and emits only
+ * committed text. Interpretation remains outside this audio boundary.
  */
 @Singleton
 class AndroidSpeechRecognizerRuntime @Inject constructor(
     @ApplicationContext private val context: Context,
     private val auditLogger: AuditLogger,
-) : GemmaTranscriberRuntime {
+) : SpeechTranscriberRuntime {
     private var activeRecognizer: SpeechRecognizer? = null
     private var activeChannel: SendChannel<TranscriptEvent>? = null
     private var latestTranscript: String = ""

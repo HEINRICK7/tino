@@ -7,6 +7,7 @@ import java.time.Instant
 import java.time.ZoneId
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -125,12 +126,133 @@ class IntelligenceRuntimeTest {
     }
 
     @Test
-    fun knowledgeUnavailableIsExplicitAndNeverUsesTransactionFacts() = runBlocking {
+    fun knowledgeQueryUsesApprovedCorpusAndNeverUsesTransactionFacts() = runBlocking {
         val response = runtime().execute(request("O que significa CFOP 5102?"))
 
-        assertEquals(IntelligenceResponseStatus.KNOWLEDGE_UNAVAILABLE, response.status)
-        assertTrue(response.limitations.single().contains("RAG"))
+        assertEquals(IntelligenceResponseStatus.ANSWERED, response.status)
+        assertTrue(response.answer.contains("código fiscal"))
+        assertTrue(response.knowledgeUsed.single().startsWith("builtin:fiscal-glossary:v1:"))
+        assertEquals("v1", response.knowledgeCatalogVersion)
+        assertEquals(KnowledgeRetrievalMode.LOCAL_APPROVED, response.knowledgeRetrievalMode)
+        assertTrue((response.knowledgeLatencyMs ?: -1L) >= 0L)
         assertTrue(response.factsUsed.isEmpty())
+    }
+
+    @Test
+    fun unknownKnowledgeTermRemainsExplicitlyUnavailable() = runBlocking {
+        val response = runtime().execute(request("Explique um termo que não existe na base"))
+
+        assertEquals(IntelligenceResponseStatus.KNOWLEDGE_UNAVAILABLE, response.status)
+        assertTrue(response.limitations.single().contains("base local aprovada"))
+        assertTrue(response.factsUsed.isEmpty())
+    }
+
+    @Test
+    fun approvedKnowledgeDoesNotCrossCollectionBoundaries() = runBlocking {
+        val answer = LocalApprovedKnowledgeAdapter().query(
+            KnowledgeQuery("CFOP", allowedCollections = setOf("tino-help")),
+        )
+
+        assertEquals(null, answer)
+    }
+
+    @Test
+    fun approvedKnowledgeCatalogRejectsDuplicateEntriesBeforeActivation() = runBlocking {
+        val catalog = VersionedApprovedKnowledgeCatalog(BuiltInApprovedKnowledgeCatalog.current)
+        val candidate = ApprovedKnowledgeCatalog(
+            version = "v2",
+            entries = listOf(
+                ApprovedKnowledgeEntry("same", "tino-help", listOf("a"), emptyList(), "A"),
+                ApprovedKnowledgeEntry("same", "tino-help", listOf("b"), emptyList(), "B"),
+            ),
+        )
+
+        val result = catalog.activate(candidate)
+
+        assertEquals(KnowledgeCatalogUpdateStatus.REJECTED, result.status)
+        assertEquals("v1", result.activeVersion)
+        assertTrue(result.errors.any { it.contains("duplicada") })
+        assertEquals("v1", catalog.current().version)
+    }
+
+    @Test
+    fun approvedKnowledgeCatalogActivatesAndRollsBackAtomically() = runBlocking {
+        val catalog = VersionedApprovedKnowledgeCatalog(BuiltInApprovedKnowledgeCatalog.current)
+        val candidate = ApprovedKnowledgeCatalog(
+            version = "v2",
+            entries = listOf(
+                ApprovedKnowledgeEntry(
+                    id = "new-term",
+                    collection = "tino-help",
+                    phrases = listOf("novo termo"),
+                    keywords = listOf("novo"),
+                    answer = "Resposta aprovada.",
+                ),
+            ),
+        )
+
+        assertEquals(KnowledgeCatalogUpdateStatus.ACTIVATED, catalog.activate(candidate).status)
+        assertEquals("v2", catalog.current().version)
+        assertEquals(KnowledgeCatalogUpdateStatus.ROLLED_BACK, catalog.rollback().status)
+        assertEquals("v1", catalog.current().version)
+        assertEquals(KnowledgeCatalogUpdateStatus.ROLLED_BACK, catalog.rollback().status)
+        assertEquals("v2", catalog.current().version)
+    }
+
+    @Test
+    fun localApprovedKnowledgeUsesActiveCatalogAndKeepsSourceProvenance() = runBlocking {
+        val catalog = VersionedApprovedKnowledgeCatalog(BuiltInApprovedKnowledgeCatalog.current)
+        catalog.activate(
+            ApprovedKnowledgeCatalog(
+                version = "v2",
+                entries = listOf(
+                    ApprovedKnowledgeEntry(
+                        id = "new-term",
+                        collection = "tino-help",
+                        phrases = listOf("novo termo"),
+                        keywords = listOf("novo"),
+                        answer = "Resposta aprovada.",
+                        sourceRef = "approved://manual/v2/new-term",
+                    ),
+                ),
+            ),
+        )
+
+        val answer = LocalApprovedKnowledgeAdapter(catalog).query(KnowledgeQuery("novo termo"))
+
+        assertEquals("v2", answer?.catalogVersion)
+        assertEquals("approved://manual/v2/new-term", answer?.sources?.single())
+        assertTrue((answer?.latencyMs ?: -1L) >= 0L)
+    }
+
+    @Test
+    fun approvedKnowledgeCatalogReportsNoRollbackWhenThereIsNoPreviousVersion() = runBlocking {
+        val catalog = VersionedApprovedKnowledgeCatalog(BuiltInApprovedKnowledgeCatalog.current)
+
+        val result = catalog.rollback()
+
+        assertEquals(KnowledgeCatalogUpdateStatus.REJECTED, result.status)
+        assertFalse(result.errors.isEmpty())
+        assertEquals("v1", result.activeVersion)
+    }
+
+    @Test
+    fun approvedKnowledgeMetricsAggregateAnsweredAndUnavailableQueries() = runBlocking {
+        val metrics = InMemoryKnowledgeRetrievalMetrics()
+        val adapter = LocalApprovedKnowledgeAdapter(
+            VersionedApprovedKnowledgeCatalog(BuiltInApprovedKnowledgeCatalog.current),
+            metrics,
+        )
+
+        adapter.query(KnowledgeQuery("CFOP"))
+        adapter.query(KnowledgeQuery("termo ausente"))
+
+        val snapshot = metrics.snapshot()
+        assertEquals(2L, snapshot.totalQueries)
+        assertEquals(1L, snapshot.answeredQueries)
+        assertEquals(1L, snapshot.unavailableQueries)
+        assertTrue(snapshot.totalLatencyMs >= 0L)
+        assertTrue(snapshot.averageLatencyMs >= 0L)
     }
 
     @Test
@@ -294,7 +416,7 @@ class IntelligenceRuntimeTest {
         planExecutor = DeterministicIntelligencePlanExecutor(
             facts = FakeFacts(customers, receivables, events, products, movements, financial),
             analytics = DeterministicBusinessAnalytics(),
-            knowledge = UnavailableKnowledgeAdapter(),
+            knowledge = LocalApprovedKnowledgeAdapter(),
             clock = clock,
         ),
         telemetry = telemetry,

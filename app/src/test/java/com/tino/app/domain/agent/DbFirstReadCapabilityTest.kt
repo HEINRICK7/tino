@@ -89,6 +89,60 @@ class DbFirstReadCapabilityTest {
     }
 
     @Test
+    fun listSuppliersReturnsRealContactDataFromRoom() = runBlocking {
+        repository.createSupplier("Distribuidora Central", "85999990000")
+
+        val result = service.listSuppliers().value
+
+        assertEquals(1, result.items.size)
+        assertEquals("Distribuidora Central", result.items.single().name)
+        assertEquals("85999990000", result.items.single().phone)
+        assertEquals(AgentDataSource.LOCAL_ONLY, result.dataSource)
+    }
+
+    @Test
+    fun emptySuppliersIsExplicitAndDoesNotInventContacts() = runBlocking {
+        val result = service.listSuppliers().value
+
+        assertTrue(result.items.isEmpty())
+        assertEquals("Nenhum fornecedor cadastrado.", result.emptyMessage)
+    }
+
+    @Test
+    fun customerContactResolvesNameAndReturnsPhoneFromRoom() = runBlocking {
+        repository.createCustomer("Maria Lina", "86994209350")
+
+        val result = service.customerContact("maria lina")
+
+        assertTrue(result is DbFirstReadResult.CustomerContact)
+        val contact = (result as DbFirstReadResult.CustomerContact).value
+        assertEquals("Maria Lina", contact.customerName)
+        assertEquals("86994209350", contact.phone)
+        assertEquals(AgentDataSource.LOCAL_ONLY, contact.dataSource)
+    }
+
+    @Test
+    fun customerContactKeepsMissingPhoneExplicit() = runBlocking {
+        repository.createCustomer("Maria Lina")
+
+        val result = service.customerContact("Maria")
+
+        assertTrue(result is DbFirstReadResult.CustomerContact)
+        assertEquals(null, (result as DbFirstReadResult.CustomerContact).value.phone)
+    }
+
+    @Test
+    fun customerContactDoesNotGuessWhenNameIsAmbiguous() = runBlocking {
+        repository.createCustomer("Maria Lina")
+        repository.createCustomer("Maria Luiza")
+
+        val result = service.customerContact("Maria")
+
+        assertTrue(result is DbFirstReadResult.Ambiguous)
+        assertEquals(listOf("Maria Lina", "Maria Luiza"), (result as DbFirstReadResult.Ambiguous).options)
+    }
+
+    @Test
     fun productFactResolvesReferenceAgainstRealProduct() = runBlocking {
         repository.createProduct("Café Maratá", 850, 24)
 
@@ -125,7 +179,7 @@ class DbFirstReadCapabilityTest {
     }
 
     @Test
-    fun boundaryReturnsTypedReadListWithoutGemmaOrMutation() = runBlocking {
+    fun boundaryReturnsTypedReadListWithoutModelOrMutation() = runBlocking {
         repository.createProduct("Café Maratá", 850, 24)
         val boundary = TinoAgentBoundary(
             financialSummaryTool = FinancialSummaryQueryTool(

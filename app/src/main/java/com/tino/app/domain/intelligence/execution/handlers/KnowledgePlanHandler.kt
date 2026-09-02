@@ -28,8 +28,18 @@ class KnowledgePlanHandler(
     }
 
     private suspend fun answerKnowledge(request: IntelligenceRequest): IntelligenceResponse {
-        val result = knowledge.query(KnowledgeQuery(request.utterance.trim(), setOf("tino-help", "fiscal-glossary", "approved-docs"))) ?: return IntelligenceResponse(IntelligenceResponseStatus.KNOWLEDGE_UNAVAILABLE, "Ainda não tenho uma base de conhecimento disponível para explicar esse termo com fonte aprovada.", plan = listOf("search_knowledge"), limitations = listOf("RAG/knowledge adapter não está configurado neste build."))
-        return IntelligenceResponse(IntelligenceResponseStatus.ANSWERED, result.answer, plan = listOf("search_knowledge", "grounded_answer"), toolCalls = listOf(call("search_knowledge", 1)), knowledgeUsed = result.sources, confidence = result.confidence)
+        val result = knowledge.query(KnowledgeQuery(request.utterance.trim(), setOf("tino-help", "fiscal-glossary", "approved-docs"))) ?: return IntelligenceResponse(IntelligenceResponseStatus.KNOWLEDGE_UNAVAILABLE, "Ainda não encontrei esse termo na base aprovada do TINO.", plan = listOf("search_knowledge"), limitations = listOf("A base local aprovada não possui uma fonte para esse termo."))
+        return IntelligenceResponse(
+            status = IntelligenceResponseStatus.ANSWERED,
+            answer = result.answer,
+            plan = listOf("search_knowledge", "grounded_answer"),
+            toolCalls = listOf(call("search_knowledge", 1)),
+            knowledgeUsed = result.sources,
+            knowledgeCatalogVersion = result.catalogVersion,
+            knowledgeRetrievalMode = result.retrievalMode,
+            knowledgeLatencyMs = result.latencyMs,
+            confidence = result.confidence,
+        )
     }
 
 }

@@ -1,8 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <activity
-            android:name=".debug.GemmaSmokeActivity"
+            android:name=".debug.AttentionNotificationSmokeActivity"
             android:exported="true"
-            android:label="TINO Gemma smoke" />
+            android:label="TINO notification smoke" />
+        <activity
+            android:name=".debug.IntelligenceRuntimeSmokeActivity"
+            android:exported="true"
+            android:label="TINO intelligence smoke" />
+        <activity
+            android:name=".debug.IntelligenceEvidenceSnapshotSmokeActivity"
+            android:exported="true"
+            android:label="TINO evidence smoke" />
     </application>
 </manifest>

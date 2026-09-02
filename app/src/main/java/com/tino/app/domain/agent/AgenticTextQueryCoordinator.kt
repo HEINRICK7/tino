@@ -441,12 +441,36 @@ class AgenticTextQueryCoordinator @Inject constructor(
      * Quick Queries use this entry point instead of manufacturing an ASR phrase.
      */
     override suspend fun askCapability(capability: AgentCapability): AgentA2uiResponse =
+        askCapability(capability, subjectId = null)
+
+    override suspend fun askCapability(
+        capability: AgentCapability,
+        subjectId: String?,
+    ): AgentA2uiResponse =
         runWithRuntimeSignals {
             mapBoundaryResponse(
                 intent = AgentIntent(
                     schemaVersion = AgentIntentSchema.VERSION,
                     capability = capability,
                     period = AgentIntentPeriod.TODAY,
+                    productRef = subjectId?.takeIf {
+                        capability in setOf(
+                            AgentCapability.REPLENISHMENT_QUERY,
+                            AgentCapability.GET_PRODUCT_STOCK,
+                            AgentCapability.GET_PRODUCT_PRICE,
+                            AgentCapability.LIST_PRODUCTS,
+                        )
+                    },
+                    customerRef = subjectId?.takeIf {
+                        capability in setOf(
+                            AgentCapability.GET_CUSTOMER_BALANCE,
+                            AgentCapability.GET_CUSTOMER_TIMELINE,
+                            AgentCapability.GET_CUSTOMER_CONTACT,
+                        )
+                    },
+                    supplierRef = subjectId?.takeIf {
+                        capability == AgentCapability.LIST_SUPPLIERS
+                    },
                 ),
                 startedAt = System.nanoTime(),
                 intentLatencyMs = 0L,
@@ -532,8 +556,20 @@ class AgenticTextQueryCoordinator @Inject constructor(
                     customerRef = customer,
                 )
             }
+            TinoIntent.REGISTER_STOCK_ENTRY -> {
+                val product = reference(LanguageEntityType.PRODUCT) ?: return null
+                val quantity = quantity?.wholeUnits?.takeIf { it > 0 } ?: return null
+                val unitCostCents = unitCostCents?.takeIf { it >= 0L } ?: return null
+                AgentIntent(
+                    schemaVersion = AgentIntentSchema.VERSION,
+                    capability = AgentCapability.REGISTER_STOCK_ENTRY,
+                    period = AgentIntentPeriod.TODAY,
+                    productRef = product,
+                    quantity = quantity,
+                    unitCostCents = unitCostCents,
+                )
+            }
             TinoIntent.ADD_CREDIT,
-            TinoIntent.REGISTER_STOCK_ENTRY,
             TinoIntent.SEARCH_PRODUCT,
             TinoIntent.SEARCH_CUSTOMER,
             TinoIntent.SEARCH_SUPPLIER,
@@ -854,11 +890,15 @@ class AgenticTextQueryCoordinator @Inject constructor(
                 com.tino.app.domain.voice.CommerceToolName.SEARCH_PRODUCT -> TinoCapabilityId.SEARCH_PRODUCT
                 com.tino.app.domain.voice.CommerceToolName.CHECK_STOCK -> TinoCapabilityId.READ_STOCK
                 com.tino.app.domain.voice.CommerceToolName.GET_CUSTOMER_BALANCE -> TinoCapabilityId.READ_CUSTOMER_BALANCE
+                com.tino.app.domain.voice.CommerceToolName.CREATE_CUSTOMER -> TinoCapabilityId.CREATE_CUSTOMER
                 else -> null
             }
         } ?: when (intent.capability) {
             AgentCapability.REGISTER_CREDIT_PAYMENT -> TinoCapabilityId.RECEIVE_CREDIT_PAYMENT
             AgentCapability.ADD_CREDIT_ITEM -> TinoCapabilityId.ADD_CREDIT_ITEM
+            AgentCapability.CREATE_CUSTOMER -> TinoCapabilityId.CREATE_CUSTOMER
+            AgentCapability.UPDATE_PRODUCT_PRICE -> TinoCapabilityId.CHANGE_PRODUCT_PRICE
+            AgentCapability.REGISTER_STOCK_ENTRY -> TinoCapabilityId.REGISTER_STOCK_ENTRY
             else -> null
         } ?: return null
         val undo = result.undo?.let { metadata ->
@@ -947,6 +987,9 @@ class AgenticTextQueryCoordinator @Inject constructor(
                 capability = when (preview.intent.capability) {
                     AgentCapability.ADD_CREDIT_ITEM -> TinoCapabilityId.ADD_CREDIT_ITEM
                     AgentCapability.REGISTER_CREDIT_PAYMENT -> TinoCapabilityId.RECEIVE_CREDIT_PAYMENT
+                    AgentCapability.CREATE_CUSTOMER -> TinoCapabilityId.CREATE_CUSTOMER
+                    AgentCapability.UPDATE_PRODUCT_PRICE -> TinoCapabilityId.CHANGE_PRODUCT_PRICE
+                    AgentCapability.REGISTER_STOCK_ENTRY -> TinoCapabilityId.REGISTER_STOCK_ENTRY
                     else -> TinoCapabilityId.NAVIGATE
                 },
                 summary = preview.preview.detail,
@@ -1085,6 +1128,10 @@ interface AgenticTextQueryPort {
     suspend fun ask(input: String): AgentA2uiResponse
 
     suspend fun askCapability(capability: AgentCapability): AgentA2uiResponse
+
+    /** Executes a capability while preserving the entity that originated the action. */
+    suspend fun askCapability(capability: AgentCapability, subjectId: String?): AgentA2uiResponse =
+        askCapability(capability)
 
     suspend fun selectEntityChoice(
         choice: AgentA2uiResponse.EntityChoice,

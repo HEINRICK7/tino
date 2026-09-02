@@ -149,6 +149,18 @@ class LanguageFoundationTest {
     }
 
     @Test
+    fun deterministicStockEntryCarriesUnitCostToTheCanonicalIntentBoundary() = runBlocking {
+        val result = interpreter.interpret(
+            LanguageInput("Chegou café maratá com 12 unidades a R$ 5,00"),
+        )
+
+        assertEquals(TinoIntent.REGISTER_STOCK_ENTRY, result?.intent)
+        assertEquals("cafe marata", result?.references?.single()?.text)
+        assertEquals(12, result?.quantity?.wholeUnits)
+        assertEquals(500L, result?.unitCostCents)
+    }
+
+    @Test
     fun contextualResolverUsesUsageAndScreenWithoutChangingEntityIdentity() {
         val resolver = ContextualEntityResolver<String>()
         val candidates = listOf(

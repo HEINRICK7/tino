@@ -2,7 +2,7 @@ package com.tino.app.feature.fiscal
 
 import androidx.camera.view.LifecycleCameraController
 import android.view.HapticFeedbackConstants
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -10,6 +10,9 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import kotlinx.coroutines.isActive
+import com.tino.app.ui.theme.LocalTinoReduceMotion
+import com.tino.app.ui.theme.TinoMotion
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -94,18 +97,25 @@ fun TinoDocumentScannerOverlay(
     modifier: Modifier = Modifier,
 ) {
     val view = LocalView.current
+    val reduceMotion = LocalTinoReduceMotion.current
     var previousState by remember { mutableStateOf(state) }
     val visibleProgress by animateFloatAsState(
         targetValue = progress.coerceIn(0f, 1f),
-        animationSpec = tween(180, easing = FastOutSlowInEasing),
+        animationSpec = TinoMotion.settle(reduceMotion),
         label = "capture-quality-progress",
     )
-    val pulse by rememberInfiniteTransition(label = "search-pulse").animateFloat(
-        initialValue = 0.72f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "search-pulse-alpha",
-    )
+    val pulse = remember { Animatable(0.72f) }
+    LaunchedEffect(reduceMotion) {
+        if (reduceMotion) {
+            pulse.snapTo(1f)
+            return@LaunchedEffect
+        }
+        var expand = true
+        while (isActive) {
+            pulse.animateTo(if (expand) 1f else 0.72f, TinoMotion.mascot())
+            expand = !expand
+        }
+    }
     val scanLine by rememberInfiniteTransition(label = "ready-scan").animateFloat(
         initialValue = 0.12f,
         targetValue = 0.88f,
@@ -141,10 +151,10 @@ fun TinoDocumentScannerOverlay(
             )
         }
         val targetQuad = detectedQuad ?: detectedPixelQuad ?: fallbackQuad
-        val topLeft by animateOffsetAsState(targetQuad.topLeft, tween(220), label = "quad-top-left")
-        val topRight by animateOffsetAsState(targetQuad.topRight, tween(220), label = "quad-top-right")
-        val bottomRight by animateOffsetAsState(targetQuad.bottomRight, tween(220), label = "quad-bottom-right")
-        val bottomLeft by animateOffsetAsState(targetQuad.bottomLeft, tween(220), label = "quad-bottom-left")
+        val topLeft by animateOffsetAsState(targetQuad.topLeft, TinoMotion.spatial(reduceMotion), label = "quad-top-left")
+        val topRight by animateOffsetAsState(targetQuad.topRight, TinoMotion.spatial(reduceMotion), label = "quad-top-right")
+        val bottomRight by animateOffsetAsState(targetQuad.bottomRight, TinoMotion.spatial(reduceMotion), label = "quad-bottom-right")
+        val bottomLeft by animateOffsetAsState(targetQuad.bottomLeft, TinoMotion.spatial(reduceMotion), label = "quad-bottom-left")
         val animatedQuad = DocumentQuad(topLeft, topRight, bottomRight, bottomLeft)
 
         Canvas(Modifier.fillMaxSize()) {
@@ -156,7 +166,7 @@ fun TinoDocumentScannerOverlay(
             val accent = if (state == CaptureUiState.READY || state == CaptureUiState.CAPTURING) {
                 TinoGreenLight
             } else {
-                TinoGreen.copy(alpha = pulse)
+                TinoGreen.copy(alpha = pulse.value)
             }
             drawPath(path, accent.copy(alpha = 0.24f), style = Stroke(width = 12f))
 

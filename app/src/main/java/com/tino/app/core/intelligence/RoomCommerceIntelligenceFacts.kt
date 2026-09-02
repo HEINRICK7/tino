@@ -1,7 +1,8 @@
 package com.tino.app.core.intelligence
 
-import com.tino.app.core.database.CreditEntryType
 import com.tino.app.domain.commerce.CommerceRepository
+import com.tino.app.domain.commerce.SharedLedgerEventType
+import com.tino.app.domain.commerce.SharedLedgerProjector
 import com.tino.app.domain.finance.FinancialPeriod
 import com.tino.app.domain.finance.FinancialProjectionRepository
 import com.tino.app.domain.intelligence.IntelligenceCustomer
@@ -11,9 +12,12 @@ import com.tino.app.domain.intelligence.IntelligencePaymentEvent
 import com.tino.app.domain.intelligence.IntelligenceProduct
 import com.tino.app.domain.intelligence.IntelligenceReceivable
 import com.tino.app.domain.intelligence.IntelligenceStockMovement
+import com.tino.app.domain.intelligence.IntelligenceSupplierLink
+import com.tino.app.domain.intelligence.IntelligenceSupplierPurchase
+import com.tino.app.domain.intelligence.IntelligenceSupplierDelivery
+import com.tino.app.core.database.PurchaseStatus
 import com.tino.app.domain.intelligence.PaymentEventType
 import java.time.Clock
-import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,21 +34,36 @@ class RoomCommerceIntelligenceFacts @Inject constructor(
         IntelligenceCustomer(it.id, it.name, it.phone)
     }
 
-    override suspend fun receivables(): List<IntelligenceReceivable> =
-        commerce.observeCustomerBalances().first().map {
-            IntelligenceReceivable(it.id, it.name, it.balanceCents)
+    override suspend fun receivables(): List<IntelligenceReceivable> {
+        val customers = commerce.allCustomersForResolution().associateBy { it.id }
+        return commerce.allSharedLedgerProjections().mapNotNull { projection ->
+            customers[projection.customerId]?.let { customer ->
+                IntelligenceReceivable(customer.id, customer.name, projection.balanceCents)
+            }
         }
+    }
 
     override suspend fun paymentEvents(customerId: String): List<IntelligencePaymentEvent> =
         commerce.creditEntriesForTimeline()
             .filter { it.customerId == customerId }
-            .map {
-                IntelligencePaymentEvent(
-                    customerId = it.customerId,
-                    type = if (it.type == CreditEntryType.SALE) PaymentEventType.SALE else PaymentEventType.PAYMENT,
-                    amountCents = kotlin.math.abs(it.amountCents),
-                    occurredAtEpochMs = it.occurredAt,
-                )
+            .mapNotNull { entry ->
+                when (SharedLedgerProjector.fromCreditEntry(entry).type) {
+                    SharedLedgerEventType.PURCHASE -> IntelligencePaymentEvent(
+                        customerId = entry.customerId,
+                        type = PaymentEventType.SALE,
+                        amountCents = kotlin.math.abs(entry.amountCents),
+                        occurredAtEpochMs = entry.occurredAt,
+                        dueAtEpochMs = entry.dueAt,
+                    )
+                    SharedLedgerEventType.PAYMENT -> IntelligencePaymentEvent(
+                        customerId = entry.customerId,
+                        type = PaymentEventType.PAYMENT,
+                        amountCents = kotlin.math.abs(entry.amountCents),
+                        occurredAtEpochMs = entry.occurredAt,
+                        dueAtEpochMs = entry.dueAt,
+                    )
+                    else -> null
+                }
             }
 
     override suspend fun resolveCustomer(reference: String): IntelligenceEntityResolution<IntelligenceCustomer> =
@@ -65,6 +84,59 @@ class RoomCommerceIntelligenceFacts @Inject constructor(
         commerce.stockMovementsForIntelligence()
             .filter { it.productId == productId }
             .map { IntelligenceStockMovement(it.productId, it.quantityDelta, it.reason, it.occurredAt) }
+
+    override suspend fun supplierLinks(): List<IntelligenceSupplierLink> {
+        val suppliers = commerce.allSuppliersForResolution().associateBy { it.id }
+        return commerce.supplierProductMappingsForIntelligence().mapNotNull { mapping ->
+            suppliers[mapping.supplierId]?.let { supplier ->
+                IntelligenceSupplierLink(
+                    productId = mapping.productId,
+                    supplierId = supplier.id,
+                    supplierName = supplier.name,
+                    linkedAtEpochMs = mapping.confirmedAt,
+                )
+            }
+        }
+    }
+
+    override suspend fun supplierPurchases(): List<IntelligenceSupplierPurchase> {
+        val suppliers = commerce.allSuppliersForResolution().associateBy { it.id }
+        return commerce.productPurchaseHistoryForIntelligence().mapNotNull { purchase ->
+            suppliers[purchase.supplierId]?.let { supplier ->
+                IntelligenceSupplierPurchase(
+                    productId = purchase.productId,
+                    supplierId = supplier.id,
+                    supplierName = supplier.name,
+                    purchasedAtEpochMs = purchase.purchasedAt,
+                    quantity = purchase.stockQuantity,
+                    unitCostCents = purchase.unitPurchaseCostCents,
+                )
+            }
+        }
+    }
+
+    override suspend fun supplierDeliveries(): List<IntelligenceSupplierDelivery> {
+        val suppliers = commerce.allSuppliersForResolution().associateBy { it.id }
+        val itemsByPurchase = commerce.purchaseItemsForIntelligence().groupBy { it.purchaseId }
+        return commerce.purchasesForIntelligence().flatMap { purchase ->
+            val supplier = purchase.supplierId?.let(suppliers::get) ?: return@flatMap emptyList()
+            val receivedAt = purchase.receivedAt ?: purchase.createdAt.takeIf {
+                purchase.status == PurchaseStatus.RECEIVED || purchase.status == PurchaseStatus.COMPLETED
+            }
+            itemsByPurchase[purchase.id].orEmpty().map { item ->
+                IntelligenceSupplierDelivery(
+                    purchaseId = purchase.id,
+                    productId = item.productId,
+                    supplierId = supplier.id,
+                    supplierName = supplier.name,
+                    orderedAtEpochMs = purchase.createdAt,
+                    expectedDeliveryAtEpochMs = purchase.expectedDeliveryAt,
+                    receivedAtEpochMs = receivedAt,
+                    quantity = item.quantity,
+                )
+            }
+        }
+    }
 
     private fun <T> resolve(
         reference: String,

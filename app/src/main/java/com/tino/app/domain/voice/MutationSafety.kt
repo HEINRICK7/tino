@@ -298,6 +298,7 @@ class MutationSafetyCoordinator @Inject constructor(
         CommerceToolName.CHANGE_PRODUCT_PRICE -> TinoCapabilityId.CHANGE_PRODUCT_PRICE
         CommerceToolName.REGISTER_SALE -> TinoCapabilityId.ADD_CREDIT
         CommerceToolName.PREPARE_PURCHASE -> TinoCapabilityId.REGISTER_STOCK_ENTRY
+        CommerceToolName.CREATE_CUSTOMER -> TinoCapabilityId.CREATE_CUSTOMER
         else -> error("Ação sem capability de mutation: ${call.name}")
     }
 
@@ -363,6 +364,7 @@ class MutationConfirmationService @Inject constructor(
         TinoCapabilityId.REGISTER_STOCK_ENTRY -> CommerceToolName.REGISTER_STOCK_RECEIPT
         TinoCapabilityId.CHANGE_PRODUCT_PRICE -> CommerceToolName.CHANGE_PRODUCT_PRICE
         TinoCapabilityId.ADD_CREDIT -> CommerceToolName.REGISTER_SALE
+        TinoCapabilityId.CREATE_CUSTOMER -> CommerceToolName.CREATE_CUSTOMER
         else -> error("Capability não representa uma mutation confirmável: $capabilityId")
     }
 }

@@ -3,12 +3,8 @@ package com.tino.app.ui.a2ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -27,12 +23,14 @@ import com.tino.app.interfaceadapter.a2ui.TinoComponentCatalogValidator
 import com.tino.app.interfaceadapter.a2ui.TinoComponentValidation
 import com.tino.app.interfaceadapter.a2ui.CoreTinoComponentCatalog
 import com.tino.app.interfaceadapter.a2ui.toSurfaceMessage
-import com.tino.app.ui.theme.TinoBorder
+import com.tino.app.ui.components.tinoAnimateContentSize
+import com.tino.app.ui.components.TinoCardRenderer
+import com.tino.app.ui.components.TinoCardSpec
+import com.tino.app.ui.components.TinoCardStatus
+import com.tino.app.ui.components.TinoSecondaryButton
+import com.tino.app.ui.icons.TinoIcons
 import com.tino.app.ui.theme.TinoInk
 import com.tino.app.ui.theme.TinoMuted
-import com.tino.app.ui.theme.TinoPaper
-import com.tino.app.ui.theme.TinoShapes
-import com.tino.app.ui.theme.TinoSize
 import com.tino.app.ui.theme.TinoSpacing
 
 /**
@@ -56,7 +54,7 @@ fun TinoA2UiSurfaceHost(
     }
 
     state?.let { current ->
-        Column(modifier, verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
+        Column(modifier.tinoAnimateContentSize(), verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
             current.components.forEach { component ->
                 TinoA2UiSurfaceComponentView(component, current.surfaceId, current.dataModel, onAction)
             }
@@ -87,7 +85,7 @@ fun TinoA2UiSurfaceHost(
         }
     }
     state?.let { current ->
-        Column(modifier, verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
+        Column(modifier.tinoAnimateContentSize(), verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
             current.components.forEach { component ->
                 TinoA2UiSurfaceComponentView(component, current.surfaceId, current.dataModel, onAction)
             }
@@ -126,22 +124,8 @@ private fun TinoA2UiSurfaceComponentView(
                 return
             }
             if (component.type == CoreTinoComponentCatalog.BUTTON) {
-                TextButton(
-                    onClick = {
-                        component.actions.firstOrNull()?.let { actionName ->
-                            onAction(
-                                A2uiActionEvent(
-                                    surfaceId = surfaceId,
-                                    componentId = component.componentId,
-                                    actionName = actionName,
-                                    payload = component.actionPayloads[actionName].orEmpty(),
-                                    sessionId = "default",
-                                ),
-                            )
-                        }
-                    },
-                ) {
-                    Text(component.props["label"] ?: "Ação", maxLines = 1)
+                TinoSecondaryButton(component.props["label"] ?: "Ação") {
+                    emitSurfaceAction(component, surfaceId, onAction)
                 }
                 return
             }
@@ -157,42 +141,31 @@ private fun TinoA2UiSurfaceComponentView(
                 ?: component.props["value"]
                 ?: component.props["message"]
                 ?: component.props["text"]
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = TinoShapes.medium,
-                border = androidx.compose.foundation.BorderStroke(TinoSize.cardBorder, TinoBorder),
-                colors = CardDefaults.cardColors(containerColor = TinoPaper),
-            ) {
-                Column(
-                    modifier = Modifier.padding(TinoSpacing.lg),
-                    verticalArrangement = Arrangement.spacedBy(TinoSpacing.xs),
-                ) {
-                    Text(title, style = MaterialTheme.typography.titleMedium, color = TinoInk)
-                    value?.takeIf { it.isNotBlank() }?.let {
-                        Text(it, style = MaterialTheme.typography.bodyLarge, color = TinoInk)
-                    }
-                    component.props["status"]?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = TinoMuted)
-                    }
-                    component.actions.forEach { actionName ->
-                        TextButton(
-                            onClick = {
-                                onAction(
-                                    A2uiActionEvent(
-                                        surfaceId = surfaceId,
-                                        componentId = component.componentId,
-                                        actionName = actionName,
-                                        payload = component.actionPayloads[actionName].orEmpty(),
-                                        sessionId = "default",
-                                    ),
-                                )
-                            },
-                        ) {
-                            Text(component.actionLabels[actionName] ?: actionName)
-                        }
-                    }
-                }
+            val actionLabel = component.actions.firstOrNull()?.let { actionName ->
+                component.actionLabels[actionName] ?: actionName.surfaceLabel()
             }
+            val message = listOfNotNull(
+                value?.takeIf { it.isNotBlank() },
+                component.props["status"]?.takeIf { it.isNotBlank() },
+            ).joinToString(" · ").ifBlank { "Informação do TINO" }
+            val status = when (component.props["status"]?.uppercase()) {
+                "WARNING", "LOW", "PENDING" -> TinoCardStatus.WARNING
+                "ERROR", "FAILED", "OVERDUE" -> TinoCardStatus.ERROR
+                "SUCCESS", "OK", "DONE" -> TinoCardStatus.SUCCESS
+                else -> TinoCardStatus.INFO
+            }
+            TinoCardRenderer(
+                TinoCardSpec.Status(
+                    icon = surfaceIcon(component.type),
+                    title = title,
+                    message = message,
+                    status = status,
+                    actionLabel = actionLabel,
+                    onAction = if (component.actions.isEmpty()) null else {
+                        { emitSurfaceAction(component, surfaceId, onAction) }
+                    },
+                ),
+            )
         }
     }
 }
@@ -204,18 +177,50 @@ fun TinoA2UiSurfaceFallbackCard(
     message: String,
     modifier: Modifier = Modifier,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = TinoShapes.medium,
-        border = androidx.compose.foundation.BorderStroke(TinoSize.cardBorder, TinoBorder),
-        colors = CardDefaults.cardColors(containerColor = TinoPaper),
-    ) {
-        Column(
-            modifier = Modifier.padding(TinoSpacing.lg),
-            verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm),
-        ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, color = TinoInk)
-            Text(message, style = MaterialTheme.typography.bodyMedium, color = TinoMuted)
-        }
+    TinoCardRenderer(
+        TinoCardSpec.Status(
+            icon = TinoIcons.Warning,
+            title = title,
+            message = message,
+            modifier = modifier,
+            status = TinoCardStatus.WARNING,
+        ),
+    )
+}
+
+private fun emitSurfaceAction(
+    component: A2uiSurfaceComponent,
+    surfaceId: String,
+    onAction: (A2uiActionEvent) -> Unit,
+) {
+    component.actions.firstOrNull()?.let { actionName ->
+        onAction(
+            A2uiActionEvent(
+                surfaceId = surfaceId,
+                componentId = component.componentId,
+                actionName = actionName,
+                payload = component.actionPayloads[actionName].orEmpty(),
+                sessionId = "default",
+            ),
+        )
     }
+}
+
+private fun surfaceIcon(type: String) = when {
+    type.contains("product", ignoreCase = true) || type.contains("inventory", ignoreCase = true) -> TinoIcons.Products
+    type.contains("customer", ignoreCase = true) || type.contains("credit", ignoreCase = true) -> TinoIcons.People
+    type.contains("payment", ignoreCase = true) || type.contains("money", ignoreCase = true) -> TinoIcons.Payment
+    type.contains("insight", ignoreCase = true) || type.contains("trend", ignoreCase = true) -> TinoIcons.Trends
+    type.contains("operation", ignoreCase = true) || type.contains("confirmation", ignoreCase = true) -> TinoIcons.Success
+    else -> TinoIcons.Document
+}
+
+private fun String.surfaceLabel(): String = when (lowercase()) {
+    "open", "open_details", "view_details", "details" -> "Ver detalhes"
+    "retry", "try_again" -> "Tentar novamente"
+    "confirm", "confirm_action" -> "Confirmar"
+    "cancel", "cancel_action" -> "Cancelar"
+    "edit" -> "Editar"
+    "register", "save" -> "Salvar"
+    else -> replace('_', ' ').replaceFirstChar { it.uppercase() }
 }

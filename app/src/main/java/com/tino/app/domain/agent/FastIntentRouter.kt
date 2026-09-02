@@ -40,11 +40,13 @@ class FastIntentRouter @Inject constructor() {
         replenishment(normalized)?.let { return it }
         productList(normalized)?.let { return it }
         productFact(normalized)?.let { return it }
-        customerList(normalized)?.let { return it }
+            customerList(normalized)?.let { return it }
+        supplierList(normalized)?.let { return it }
         receivables(normalized)?.let { return it }
         overdue(normalized)?.let { return it }
         financialSummary(normalized)?.let { return it }
         customerTimeline(normalized)?.let { return it }
+        customerContact(normalized)?.let { return it }
         customerBalance(normalized)?.let { return it }
         return FastIntentResult.NoMatch
     }
@@ -92,14 +94,19 @@ class FastIntentRouter @Inject constructor() {
             AgentCapability.GET_PRODUCT_STOCK -> "Consultando estoque…"
             AgentCapability.GET_PRODUCT_PRICE -> "Consultando preço…"
             AgentCapability.LIST_CUSTOMERS -> "Consultando clientes…"
+            AgentCapability.LIST_SUPPLIERS -> "Consultando fornecedores…"
             AgentCapability.LIST_RECEIVABLES,
             AgentCapability.LIST_OVERDUE,
             AgentCapability.GET_CUSTOMER_BALANCE,
             AgentCapability.GET_CUSTOMER_TIMELINE,
             -> "Consultando a caderneta…"
+            AgentCapability.GET_CUSTOMER_CONTACT -> "Consultando contato…"
             AgentCapability.READ_FINANCIAL_SUMMARY -> "Consultando recebimentos…"
             AgentCapability.ADD_CREDIT_ITEM -> "Preparando o fiado…"
             AgentCapability.REGISTER_CREDIT_PAYMENT -> "Preparando a baixa do fiado…"
+            AgentCapability.CREATE_CUSTOMER -> "Preparando o cadastro…"
+            AgentCapability.UPDATE_PRODUCT_PRICE -> "Preparando a alteração de preço…"
+            AgentCapability.REGISTER_STOCK_ENTRY -> "Preparando a entrada…"
         }
             FastIntentResult.NoMatch -> when (val command = commandRouter.route(input)) {
                 is CommandIntentResult.Match -> when (command.intent.capability) {
@@ -221,6 +228,35 @@ class FastIntentRouter @Inject constructor() {
             text.contains("quem esta no fiado")
         if (!matches) return null
         return match(TinoToolId.LIST_RECEIVABLES, AgentCapability.LIST_RECEIVABLES)
+    }
+
+    private fun supplierList(text: String): FastIntentResult.Match? {
+        val matches = containsAny(
+            text,
+            "quais fornecedores",
+            "fornecedores cadastrados",
+            "quais fornecedores eu tenho",
+            "me mostra os fornecedores",
+            "me mostre os fornecedores",
+            "quero ver meus fornecedores",
+            "ver meus fornecedores",
+            "lista meus fornecedores",
+            "listar meus fornecedores",
+            "listar fornecedores",
+            "lista de fornecedores",
+        ) || text in setOf("fornecedores", "fornecedor") || (
+            text.contains("fornecedor") && containsAny(
+                text,
+                "todos",
+                "lista",
+                "listar",
+                "mostra",
+                "mostre",
+                "quais",
+            )
+        )
+        if (!matches) return null
+        return match(TinoToolId.LIST_SUPPLIERS, AgentCapability.LIST_SUPPLIERS)
     }
 
     private fun overdue(text: String): FastIntentResult.Match? {
@@ -346,6 +382,35 @@ class FastIntentRouter @Inject constructor() {
             intent = AgentIntent(
                 schemaVersion = AgentIntentSchema.VERSION,
                 capability = AgentCapability.GET_CUSTOMER_TIMELINE,
+                period = AgentIntentPeriod.TODAY,
+                customerRef = reference,
+            ),
+        )
+    }
+
+    private fun customerContact(text: String): FastIntentResult.Match? {
+        if (!(text.contains("telefone") || text.contains("contato"))) return null
+        val marker = when {
+            text.startsWith("qual e o telefone ") -> "qual e o telefone "
+            text.startsWith("qual o telefone ") -> "qual o telefone "
+            text.startsWith("qual e o contato ") -> "qual e o contato "
+            text.startsWith("qual o contato ") -> "qual o contato "
+            text.startsWith("me passa o telefone ") -> "me passa o telefone "
+            text.startsWith("me mostre o telefone ") -> "me mostre o telefone "
+            text.startsWith("telefone ") -> "telefone "
+            text.startsWith("contato ") -> "contato "
+            else -> return null
+        }
+        val reference = text.removePrefix(marker).trim()
+            .removePrefix("da ").removePrefix("do ").removePrefix("de ")
+            .removePrefix("dona ").removePrefix("don ").trim()
+            .removeSuffix("?").trim()
+            .takeIf { it.isNotBlank() } ?: return null
+        return FastIntentResult.Match(
+            tool = TinoToolId.CUSTOMER_CONTACT,
+            intent = AgentIntent(
+                schemaVersion = AgentIntentSchema.VERSION,
+                capability = AgentCapability.GET_CUSTOMER_CONTACT,
                 period = AgentIntentPeriod.TODAY,
                 customerRef = reference,
             ),

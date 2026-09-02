@@ -86,7 +86,7 @@ class AgentRuntimeTest {
         val executor = CountingExecutor()
         val result = DefaultAgentRuntime(
             planner = object : PlannerPort {
-                override val id = "adk"
+                override val id = "deterministic"
                 override suspend fun plan(request: IntelligenceRequest) = IntelligencePlan(
                     goal = IntelligenceGoal.INVENTORY,
                     steps = listOf(IntelligencePlanStep("delete_everything", "não permitido")),
@@ -181,7 +181,7 @@ class AgentRuntimeTest {
     }
 
     private class ReplanningPlanner : PlannerPort {
-        override val id: String = "adk"
+        override val id: String = "deterministic"
         var calls = 0
 
         override suspend fun plan(request: IntelligenceRequest): IntelligencePlan {

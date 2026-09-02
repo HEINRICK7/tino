@@ -71,7 +71,22 @@ class FastIntentRouterTest {
     }
 
     @Test
-    fun routesTimelineAndLeavesComplexRequestsForGemma() {
+    fun routesCustomerContactWithoutLettingTheTranscriptSupplyThePhone() {
+        listOf(
+            "Qual é o telefone da Maria Lina?",
+            "Qual o contato da Maria Lina?",
+            "Me passa o telefone da Maria Lina",
+            "Telefone da Maria Lina",
+        ).forEach { phrase ->
+            val result = router.route(phrase) as FastIntentResult.Match
+            assertEquals(TinoToolId.CUSTOMER_CONTACT, result.tool)
+            assertEquals(AgentCapability.GET_CUSTOMER_CONTACT, result.intent.capability)
+            assertEquals("maria lina", result.intent.customerRef)
+        }
+    }
+
+    @Test
+    fun routesTimelineAndLeavesComplexRequestsUnsupported() {
         val timeline = router.route("Mostra a caderneta da Maria Lina") as FastIntentResult.Match
         assertEquals(TinoToolId.CUSTOMER_TIMELINE, timeline.tool)
         assertEquals("maria lina", timeline.intent.customerRef)
@@ -81,7 +96,7 @@ class FastIntentRouterTest {
     }
 
     @Test
-    fun routesDbFirstProductAndCustomerReadsWithoutGemma() {
+    fun routesDbFirstProductAndCustomerReadsDeterministically() {
         listOf(
             "Quais produtos eu tenho?",
             "Quais produtos eu tenho cadastrado no meu estoque?",
@@ -116,6 +131,14 @@ class FastIntentRouterTest {
             "Me mostre todos os clientes cadastrados",
         ).forEach { phrase ->
             assertEquals(AgentCapability.LIST_CUSTOMERS, (router.route(phrase) as FastIntentResult.Match).intent.capability)
+        }
+        listOf(
+            "Quais fornecedores tenho?",
+            "Quero ver meus fornecedores",
+            "Lista de fornecedores",
+            "Me mostra todos os fornecedores cadastrados",
+        ).forEach { phrase ->
+            assertEquals(AgentCapability.LIST_SUPPLIERS, (router.route(phrase) as FastIntentResult.Match).intent.capability)
         }
         assertEquals(AgentCapability.LIST_RECEIVABLES, (router.route("Quem está me devendo?") as FastIntentResult.Match).intent.capability)
         assertEquals(AgentCapability.LIST_OVERDUE, (router.route("Quais fiados estão vencidos?") as FastIntentResult.Match).intent.capability)
@@ -153,11 +176,13 @@ class FastIntentRouterTest {
         assertTrue(TinoToolCatalog.contains(TinoToolId.FINANCIAL_SUMMARY))
         assertTrue(TinoToolCatalog.contains(TinoToolId.CUSTOMER_BALANCE))
         assertTrue(TinoToolCatalog.contains(TinoToolId.CUSTOMER_TIMELINE))
+        assertTrue(TinoToolCatalog.contains(TinoToolId.CUSTOMER_CONTACT))
         assertTrue(TinoToolCatalog.contains(TinoToolId.LIST_PRODUCTS))
         assertTrue(TinoToolCatalog.contains(TinoToolId.REPLENISHMENT_QUERY))
         assertTrue(TinoToolCatalog.contains(TinoToolId.PRODUCT_STOCK))
         assertTrue(TinoToolCatalog.contains(TinoToolId.PRODUCT_PRICE))
         assertTrue(TinoToolCatalog.contains(TinoToolId.LIST_CUSTOMERS))
+        assertTrue(TinoToolCatalog.contains(TinoToolId.LIST_SUPPLIERS))
         assertTrue(TinoToolCatalog.contains(TinoToolId.LIST_RECEIVABLES))
         assertTrue(TinoToolCatalog.contains(TinoToolId.LIST_OVERDUE))
     }
@@ -165,9 +190,11 @@ class FastIntentRouterTest {
     @Test
     fun exposesContextualReadStatusInsteadOfGenericUnderstanding() {
         assertEquals("Consultando produtos…", router.contextLabel("Quais produtos temos?"))
+        assertEquals("Consultando fornecedores…", router.contextLabel("Quais fornecedores tenho?"))
         assertEquals("Consultando estoque…", router.contextLabel("Quanto de Café Maratá tenho?"))
         assertEquals("Abrindo clientes…", router.contextLabel("clientes"))
         assertEquals("Consultando a caderneta…", router.contextLabel("Quem está me devendo?"))
+        assertEquals("Consultando contato…", router.contextLabel("Qual é o telefone da Maria?"))
         assertEquals("Consultando recebimentos…", router.contextLabel("Quanto entrou no PIX hoje?"))
     }
 

@@ -24,4 +24,15 @@ class TinoToolCatalogTest {
         assertTrue(TinoToolCatalog.all.all { it.sourceOfTruth.isNotBlank() })
         assertTrue(TinoToolCatalog.all.all { it.offline })
     }
+
+    @Test
+    fun stockEntryIsPrepareOnlyAndResolvesProductAndSupplierLocally() {
+        val descriptor = TinoToolCatalog.descriptor(TinoToolId.STOCK_ENTRY)
+
+        assertEquals(TinoToolMode.PREPARE_ONLY, descriptor.mode)
+        assertEquals(TinoToolRisk.HIGH, descriptor.risk)
+        assertEquals(TinoEntityResolution.MULTIPLE, descriptor.entityResolution)
+        assertEquals("stock_entry_preview", descriptor.a2uiComponent)
+        assertTrue(descriptor.arguments.containsAll(setOf("product_ref", "quantity", "unit_cost_cents", "supplier_ref")))
+    }
 }

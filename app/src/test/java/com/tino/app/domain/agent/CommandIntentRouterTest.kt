@@ -38,7 +38,7 @@ class CommandIntentRouterTest {
     }
 
     @Test
-    fun leavesComplexOrNonCreditTextForGemma() {
+    fun leavesComplexOrNonCreditTextUnsupported() {
         assertTrue(router.route("quanto entrou hoje") is CommandIntentResult.NoMatch)
         assertTrue(router.route("Maria Lina comprou café ontem") is CommandIntentResult.NoMatch)
     }

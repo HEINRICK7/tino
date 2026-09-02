@@ -12,6 +12,7 @@ class DeterministicLanguageInterpreter @Inject constructor() : LanguageIntentInt
             refs: List<EntityReference> = emptyList(),
             quantity: ParsedQuantity? = null,
             amount: Long? = null,
+            unitCost: Long? = null,
             method: PaymentMethod? = null,
             operations: List<IntentInterpretation> = emptyList(),
         ): IntentInterpretation =
@@ -20,6 +21,7 @@ class DeterministicLanguageInterpreter @Inject constructor() : LanguageIntentInt
                 references = refs,
                 quantity = quantity,
                 amountCents = amount,
+                unitCostCents = unitCost,
                 paymentMethod = method,
                 source = input.source,
                 transcript = input.transcript,
@@ -71,6 +73,7 @@ class DeterministicLanguageInterpreter @Inject constructor() : LanguageIntentInt
                 intent = TinoIntent.REGISTER_STOCK_ENTRY,
                 refs = listOf(EntityReference(LanguageEntityType.PRODUCT, stock.product)),
                 quantity = stock.quantity,
+                unitCost = stock.unitCostCents,
             )
         }
 
@@ -206,17 +209,22 @@ class DeterministicLanguageInterpreter @Inject constructor() : LanguageIntentInt
 
     private fun parseStockEntry(text: String): StockData? {
         if (!(text.startsWith("chegou ") || text.startsWith("chegaram ") || text.startsWith("recebi mercadoria"))) return null
-        val body = text.removePrefix("chegaram ").removePrefix("chegou ").removePrefix("recebi mercadoria ").trim()
+        val rawBody = text.removePrefix("chegaram ").removePrefix("chegou ").removePrefix("recebi mercadoria ").trim()
+        val costMatch = Regex("\\s+(?:a|por|custo)\\s+(?:r\\s*)?([0-9]+(?:[.,][0-9]{1,2})?)\\s*(?:reais|real)?$").find(rawBody)
+        val unitCostCents = costMatch?.groupValues?.get(1)?.let(MoneyParser::parse)
+        val body = costMatch?.let { rawBody.removeRange(it.range).trim() } ?: rawBody
         if (body.startsWith("uma caixa de ")) {
             return StockData(
                 product = body.removePrefix("uma caixa de ").trim(),
                 quantity = QuantityParser.parse("1 caixa") ?: return null,
+                unitCostCents = unitCostCents,
             )
         }
         if (body.startsWith("um pacote de ")) {
             return StockData(
                 product = body.removePrefix("um pacote de ").trim(),
                 quantity = QuantityParser.parse("1 pacote") ?: return null,
+                unitCostCents = unitCostCents,
             )
         }
         val quantityMatch = Regex("^(.+?)\\s+(?:com|de)\\s+(.+)$").matchEntire(body)
@@ -242,7 +250,7 @@ class DeterministicLanguageInterpreter @Inject constructor() : LanguageIntentInt
             quantity = QuantityParser.parse(packagedProduct.second) ?: return null
         }
         if (product.isBlank()) return null
-        return StockData(product, quantity)
+        return StockData(product, quantity, unitCostCents)
     }
 
     private fun extractReference(text: String, stopWords: List<String>): String? = text
@@ -255,6 +263,10 @@ class DeterministicLanguageInterpreter @Inject constructor() : LanguageIntentInt
 
     private data class PaymentData(val customer: String, val amountCents: Long, val paymentMethod: PaymentMethod?)
     private data class CreditData(val customer: String, val product: String?, val quantity: ParsedQuantity)
-    private data class StockData(val product: String, val quantity: ParsedQuantity)
+    private data class StockData(
+        val product: String,
+        val quantity: ParsedQuantity,
+        val unitCostCents: Long? = null,
+    )
     private data class CompoundData(val operations: List<IntentInterpretation>)
 }

@@ -2,6 +2,7 @@ package com.tino.app.domain.agent
 
 import com.tino.app.domain.voice.ToolCall
 import com.tino.app.domain.commerce.PaymentMethod
+import java.util.Locale
 
 data class RawAgentIntent(
     val schema: String?,
@@ -9,7 +10,12 @@ data class RawAgentIntent(
     val capability: String?,
     val period: String?,
     val customerRef: String? = null,
+    val customerName: String? = null,
+    val customerPhone: String? = null,
     val productRef: String? = null,
+    val supplierRef: String? = null,
+    val newPriceCents: Long? = null,
+    val unitCostCents: Long? = null,
     val quantity: Int? = null,
     val amountCents: Long? = null,
     val paymentMethod: String? = null,
@@ -47,7 +53,12 @@ data class AgentIntent(
     val capability: AgentCapability,
     val period: AgentIntentPeriod,
     val customerRef: String? = null,
+    val customerName: String? = null,
+    val customerPhone: String? = null,
     val productRef: String? = null,
+    val supplierRef: String? = null,
+    val newPriceCents: Long? = null,
+    val unitCostCents: Long? = null,
     val quantity: Int? = null,
     val amountCents: Long? = null,
     val paymentMethod: FinancialPaymentMethod = FinancialPaymentMethod.ALL,
@@ -75,7 +86,13 @@ object AgentIntentSchema {
         "capability",
         "period",
         "customer_ref",
+        "customer_name",
+        "phone",
         "product_ref",
+        "supplier_ref",
+        "new_price_cents",
+        "unit_cost_cents",
+        "unit_cost_cents",
         "quantity",
         "amount_cents",
         "payment_method",
@@ -88,11 +105,16 @@ object AgentIntentSchema {
         AgentCapability.GET_PRODUCT_STOCK,
         AgentCapability.GET_PRODUCT_PRICE,
         AgentCapability.LIST_CUSTOMERS,
+        AgentCapability.LIST_SUPPLIERS,
         AgentCapability.LIST_RECEIVABLES,
         AgentCapability.LIST_OVERDUE,
         AgentCapability.ADD_CREDIT_ITEM,
         AgentCapability.GET_CUSTOMER_BALANCE,
         AgentCapability.GET_CUSTOMER_TIMELINE,
+        AgentCapability.GET_CUSTOMER_CONTACT,
+        AgentCapability.CREATE_CUSTOMER,
+        AgentCapability.UPDATE_PRODUCT_PRICE,
+        AgentCapability.REGISTER_STOCK_ENTRY,
         AgentCapability.REGISTER_CREDIT_PAYMENT,
     )
 
@@ -109,8 +131,13 @@ object AgentIntentSchema {
                 userMessage = "Não consegui entender exatamente o que você quer fazer.",
             )
         }
-        val capability = AgentCapability.entries.firstOrNull {
-            it.name.equals(raw.capability?.trim(), ignoreCase = true)
+        val capability = when (raw.capability?.trim()?.uppercase(Locale.ROOT)) {
+            "READ_CUSTOMER_BALANCE" -> AgentCapability.GET_CUSTOMER_BALANCE
+            "RECEIVE_CREDIT_PAYMENT" -> AgentCapability.REGISTER_CREDIT_PAYMENT
+            "CHANGE_PRODUCT_PRICE", "UPDATE_PRODUCT_PRICE" -> AgentCapability.UPDATE_PRODUCT_PRICE
+            else -> AgentCapability.entries.firstOrNull {
+                it.name.equals(raw.capability?.trim(), ignoreCase = true)
+            }
         } ?: return AgentIntentResult.Unsupported(
             reason = "UNSUPPORTED_CAPABILITY",
             userMessage = "Não consegui entender exatamente o que você quer fazer.",
@@ -127,17 +154,26 @@ object AgentIntentSchema {
                 allowedKeys - "customer_ref" - "product_ref" - "quantity" - "amount_cents"
             AgentCapability.ADD_CREDIT_ITEM -> allowedKeys - "payment_method" - "metric" - "amount_cents"
             AgentCapability.REGISTER_CREDIT_PAYMENT -> allowedKeys - "product_ref" - "quantity" - "metric"
+            AgentCapability.CREATE_CUSTOMER -> allowedKeys - "customer_ref" - "product_ref" - "quantity" - "amount_cents" - "payment_method" - "metric"
+            AgentCapability.UPDATE_PRODUCT_PRICE -> allowedKeys - "customer_ref" - "customer_name" - "phone" - "quantity" - "amount_cents" - "payment_method" - "metric"
+            AgentCapability.REGISTER_STOCK_ENTRY ->
+                allowedKeys - "customer_ref" - "customer_name" - "phone" - "new_price_cents" - "amount_cents" - "payment_method" - "metric"
             AgentCapability.GET_PRODUCT_STOCK,
             AgentCapability.GET_PRODUCT_PRICE,
-            -> allowedKeys - "payment_method" - "metric" - "customer_ref" - "quantity" - "amount_cents"
-            AgentCapability.LIST_PRODUCTS,
-            AgentCapability.REPLENISHMENT_QUERY,
+            -> allowedKeys - "payment_method" - "metric" - "customer_ref" - "supplier_ref" - "quantity" - "amount_cents" - "new_price_cents"
             AgentCapability.LIST_CUSTOMERS,
             AgentCapability.LIST_RECEIVABLES,
             AgentCapability.LIST_OVERDUE,
-            -> allowedKeys - "payment_method" - "metric" - "customer_ref" - "product_ref" - "quantity" - "amount_cents"
+            -> allowedKeys - "payment_method" - "metric" - "customer_ref" - "product_ref" - "supplier_ref" - "quantity" - "amount_cents"
+            AgentCapability.LIST_SUPPLIERS ->
+                allowedKeys - "payment_method" - "metric" - "customer_ref" - "product_ref" - "quantity" - "amount_cents"
+            AgentCapability.LIST_PRODUCTS ->
+                allowedKeys - "payment_method" - "metric" - "customer_ref" - "supplier_ref" - "quantity" - "amount_cents"
+            AgentCapability.REPLENISHMENT_QUERY ->
+                allowedKeys - "payment_method" - "metric" - "customer_ref" - "supplier_ref" - "quantity" - "amount_cents"
             AgentCapability.GET_CUSTOMER_BALANCE,
             AgentCapability.GET_CUSTOMER_TIMELINE,
+            AgentCapability.GET_CUSTOMER_CONTACT,
             -> allowedKeys - "payment_method" - "metric" - "product_ref" - "quantity" - "amount_cents"
         }
         val unexpectedKeys = raw.keys - allowedKeysForCapability
@@ -163,6 +199,65 @@ object AgentIntentSchema {
             reason = "UNSUPPORTED_PERIOD",
             userMessage = "Não consegui identificar o período dessa consulta.",
         )
+        if (capability == AgentCapability.CREATE_CUSTOMER) {
+            val customerName = raw.customerName?.trim().orEmpty()
+            if (customerName.isBlank()) {
+                return AgentIntentResult.Unsupported(
+                    reason = "MISSING_CUSTOMER_NAME",
+                    userMessage = "Preciso do nome do cliente para preparar o cadastro.",
+                )
+            }
+            return AgentIntentResult.Supported(
+                AgentIntent(
+                    schemaVersion = VERSION,
+                    capability = capability,
+                    period = period,
+                    customerName = customerName,
+                    customerPhone = raw.customerPhone?.trim()?.ifBlank { null },
+                ),
+            )
+        }
+        if (capability == AgentCapability.UPDATE_PRODUCT_PRICE) {
+            val productRef = raw.productRef?.trim().orEmpty()
+            val newPriceCents = raw.newPriceCents
+            if (productRef.isBlank() || newPriceCents == null || newPriceCents <= 0L) {
+                return AgentIntentResult.Unsupported(
+                    reason = "INCOMPLETE_PRODUCT_PRICE_UPDATE",
+                    userMessage = "Preciso do produto e do novo preço para preparar a alteração.",
+                )
+            }
+            return AgentIntentResult.Supported(
+                AgentIntent(
+                    schemaVersion = VERSION,
+                    capability = capability,
+                    period = period,
+                    productRef = productRef,
+                    newPriceCents = newPriceCents,
+                ),
+            )
+        }
+        if (capability == AgentCapability.REGISTER_STOCK_ENTRY) {
+            val productRef = raw.productRef?.trim().orEmpty()
+            val quantity = raw.quantity
+            val unitCostCents = raw.unitCostCents
+            if (productRef.isBlank() || quantity == null || quantity <= 0 || unitCostCents == null || unitCostCents < 0L) {
+                return AgentIntentResult.Unsupported(
+                    reason = "INCOMPLETE_STOCK_ENTRY",
+                    userMessage = "Preciso do produto, quantidade e custo unitário para preparar a entrada.",
+                )
+            }
+            return AgentIntentResult.Supported(
+                AgentIntent(
+                    schemaVersion = VERSION,
+                    capability = capability,
+                    period = period,
+                    productRef = productRef,
+                    quantity = quantity,
+                    unitCostCents = unitCostCents,
+                    supplierRef = raw.supplierRef?.trim()?.ifBlank { null },
+                ),
+            )
+        }
         if (capability == AgentCapability.ADD_CREDIT_ITEM) {
             val customerRef = raw.customerRef?.trim().orEmpty()
             val productRef = raw.productRef?.trim().orEmpty()
@@ -211,7 +306,9 @@ object AgentIntentSchema {
             )
         }
         if (capability == AgentCapability.GET_PRODUCT_STOCK ||
-            capability == AgentCapability.GET_PRODUCT_PRICE
+            capability == AgentCapability.GET_PRODUCT_PRICE ||
+            capability == AgentCapability.REPLENISHMENT_QUERY && !raw.productRef.isNullOrBlank() ||
+            capability == AgentCapability.LIST_PRODUCTS && !raw.productRef.isNullOrBlank()
         ) {
             val productRef = raw.productRef?.trim().orEmpty()
             if (productRef.isBlank()) {
@@ -229,8 +326,19 @@ object AgentIntentSchema {
                 ),
             )
         }
+        if (capability == AgentCapability.LIST_SUPPLIERS && !raw.supplierRef.isNullOrBlank()) {
+            return AgentIntentResult.Supported(
+                AgentIntent(
+                    schemaVersion = VERSION,
+                    capability = capability,
+                    period = period,
+                    supplierRef = raw.supplierRef.trim(),
+                ),
+            )
+        }
         if (capability == AgentCapability.LIST_PRODUCTS ||
             capability == AgentCapability.LIST_CUSTOMERS ||
+            capability == AgentCapability.LIST_SUPPLIERS ||
             capability == AgentCapability.LIST_RECEIVABLES ||
             capability == AgentCapability.LIST_OVERDUE
         ) {
@@ -244,12 +352,17 @@ object AgentIntentSchema {
         }
         if (capability == AgentCapability.GET_CUSTOMER_BALANCE ||
             capability == AgentCapability.GET_CUSTOMER_TIMELINE
+            || capability == AgentCapability.GET_CUSTOMER_CONTACT
         ) {
             val customerRef = raw.customerRef?.trim().orEmpty()
             if (customerRef.isBlank()) {
                 return AgentIntentResult.Unsupported(
                     reason = "MISSING_CUSTOMER_REFERENCE",
-                    userMessage = "Preciso saber de qual cliente você quer consultar o fiado.",
+                    userMessage = if (capability == AgentCapability.GET_CUSTOMER_CONTACT) {
+                        "Preciso saber de qual cliente você quer consultar o contato."
+                    } else {
+                        "Preciso saber de qual cliente você quer consultar o fiado."
+                    },
                 )
             }
             return AgentIntentResult.Supported(

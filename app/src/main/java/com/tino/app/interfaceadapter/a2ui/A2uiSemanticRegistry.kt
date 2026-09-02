@@ -30,6 +30,7 @@ object A2uiSemanticComponentRegistry {
         -> TinoA2UiComponentCatalog.CREDIT_PREVIEW
         TinoCapabilityId.READ_STOCK -> TinoA2UiComponentCatalog.STOCK_STATUS
         TinoCapabilityId.SEARCH_SUPPLIER -> TinoA2UiComponentCatalog.SUPPLIER_SUMMARY
+        TinoCapabilityId.GET_CUSTOMER_CONTACT -> TinoA2UiComponentCatalog.CUSTOMER_CONTACT
         else -> TinoA2UiComponentCatalog.ACTION_CONFIRMATION
     }
 

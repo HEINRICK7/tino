@@ -10,7 +10,6 @@ class AgenticVoiceMetricsTest {
         val metrics = AgenticVoiceMetrics(
             ttfpMs = 420L,
             voiceFinalMs = 4_330L,
-            gemmaMs = 0L,
             intentMs = 3L,
             capabilityMs = 97L,
             a2uiMs = 0L,
@@ -32,7 +31,6 @@ class AgenticVoiceMetricsTest {
         val metrics = AgenticVoiceMetrics(
             ttfpMs = null,
             voiceFinalMs = 100L,
-            gemmaMs = 0L,
             intentMs = 1L,
             capabilityMs = 1L,
             a2uiMs = 1L,

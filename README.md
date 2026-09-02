@@ -49,7 +49,7 @@ gradle :app:testDebugUnitTest :tino-fiscal-core:test :app:lintDebug :app:assembl
 ```
 
 O build release-like continua sem minificação nesta fase porque o APK ainda
-depende de runtimes locais (CameraX, ML Kit, Room, Hilt e MediaPipe) que devem
+depende de runtimes locais (CameraX, ML Kit, Room e Hilt) que devem
 ganhar regras de shrink/keep específicas antes de ativar R8. Isso evita mascarar
 classes removidas como se fossem uma validação de hardening.
 
@@ -61,11 +61,6 @@ suficiente para comprimir os assets locais, acrescente:
 ```
 
 APK: `app/build/outputs/apk/debug/app-debug.apk`.
-
-O arquivo local `app/src/main/assets/models/gemma3-1b-it-int4.task` não é
-versionado por ser um modelo de aproximadamente 529 MB. Para executar o
-fallback Gemma local, disponibilize esse asset separadamente no ambiente de
-build/device.
 
 O APK de piloto atual é identificado como `0.1.0-pilot.1` e possui
 `versionCode=2`, permitindo upgrade sobre o primeiro APK sem apagar o banco.
@@ -83,12 +78,10 @@ O APK de piloto atual é identificado como `0.1.0-pilot.1` e possui
   reprocessamento em `specs/TINO-BACKEND-002-sync-contracts.md`.
 - Eventos de transcrição `partial/revised/committed`, Tool Calling e
   confirmação humana.
-- Roteamento global de texto/voz para vendas, estoque, preços, compras,
-  produtos, clientes, fornecedores e fiado, com fallback determinístico quando
-  o Gemma estiver indisponível.
-- Transcrição direcionada ao runtime Gemma por `GemmaLiveTranscriber`, sem
-  transcriber paralelo; fallback explícito enquanto o runtime não estiver no
-  APK.
+- Roteamento determinístico de texto/voz para as capacidades suportadas; frases
+  não mapeadas resultam em esclarecimento seguro ou entrada manual.
+- Transcrição Android independente de qualquer modelo generativo; comandos
+  estruturados passam por roteadores determinísticos e revisão humana.
 - Parser seguro de NF-e XML, drafts de pedido/WhatsApp, retirada/entrega e
   recomendações heurísticas sem mutação do domínio.
 - Auditoria redigida e armazenamento de tokens via Android Keystore.
@@ -99,8 +92,8 @@ O APK de piloto atual é identificado como `0.1.0-pilot.1` e possui
 
 ## Integrações externas
 
-O código expõe portas para Live Transcriber, Gemma runtime, Fiscal Provider,
-WhatsApp e cloud. O app usa um parser determinístico de piloto para voz e um
+O código expõe portas para Live Transcriber, Fiscal Provider, WhatsApp e cloud.
+O app usa interpretação determinística para voz e um
 gateway indisponível quando `TINO_SYNC_BASE_URL` está vazio; isso mantém retry
 seguro em desenvolvimento e evita declarar uma operação como sincronizada sem
 um backend real.

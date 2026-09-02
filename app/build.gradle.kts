@@ -19,6 +19,19 @@ android {
         buildConfigField("String", "TINO_BUILD_CHANNEL", "\"pilot\"")
         buildConfigField("String", "TINO_BUILD_ID", "\"0.1.0-pilot.1\"")
         buildConfigField("String", "TINO_SYNC_BASE_URL", "\"\"")
+        val backendBaseUrl = providers.gradleProperty("tinoApiBaseUrl").orNull
+            ?: providers.gradleProperty("tinoBackendBaseUrl").orNull
+            ?: "https://api.tino.otimizanegocio.com/"
+        val oidcIssuer = providers.gradleProperty("tinoOidcIssuer").orNull
+            ?: "https://auth.tino.otimizanegocio.com/realms/tino"
+        val oidcClientId = providers.gradleProperty("tinoOidcClientId").orNull ?: "tino-android"
+        val oidcRedirectUri = providers.gradleProperty("tinoOidcRedirectUri").orNull ?: "tino://oauth/callback"
+        buildConfigField("String", "TINO_BACKEND_BASE_URL", "\"${backendBaseUrl.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        buildConfigField("String", "TINO_API_BASE_URL", "\"${backendBaseUrl.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        buildConfigField("String", "TINO_OIDC_ISSUER", "\"${oidcIssuer.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        buildConfigField("String", "TINO_OIDC_CLIENT_ID", "\"${oidcClientId.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        buildConfigField("String", "TINO_OIDC_REDIRECT_URI", "\"${oidcRedirectUri.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        manifestPlaceholders["appAuthRedirectScheme"] = "tino"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -55,16 +68,6 @@ android {
     }
 }
 
-// ADK 0.6 publishes a newer stdlib variant in Gradle metadata. Keep the app and its annotation
-// processors on the Kotlin 2.1 line used by this build; the ADK API itself is binary-compatible.
-configurations.configureEach {
-    resolutionStrategy.eachDependency {
-        if (requested.group == "org.jetbrains.kotlin" && requested.name.startsWith("kotlin-stdlib")) {
-            useVersion("2.1.20")
-        }
-    }
-}
-
 dependencies {
     implementation(project(":tino-agent-contracts"))
     implementation(project(":tino-fiscal-core"))
@@ -79,6 +82,7 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.animation)
     implementation(libs.androidx.compose.material.icons.extended)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
@@ -91,18 +95,21 @@ dependencies {
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.dagger.hilt.android)
     kapt(libs.dagger.hilt.compiler)
-    implementation(libs.mediapipe.tasks.genai)
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.mlkit.text.recognition)
-    implementation(libs.google.adk.kotlin.core)
+    implementation(libs.mlkit.barcode.scanning)
+    implementation(libs.gson)
+    implementation(libs.androidx.appauth)
 
     testImplementation(libs.junit)
     testImplementation(libs.androidx.room.testing)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }
 
 kapt {

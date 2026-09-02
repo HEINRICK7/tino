@@ -57,6 +57,16 @@ sealed interface TinoA2UiTreeNode {
         val actionPayloads: Map<String, Map<String, String>> = emptyMap(),
     ) : TinoA2UiTreeNode
 
+    data class CatalogListComponent(
+        val title: String,
+        val items: List<A2uiCatalogItem>,
+        val variant: String = "catalog",
+        val emptyMessage: String? = null,
+        val footerActionName: String? = null,
+        val footerActionLabel: String? = null,
+        val footerActionPayload: Map<String, String> = emptyMap(),
+    ) : TinoA2UiTreeNode
+
     data class Button(
         val label: String,
         val actionName: String,
@@ -83,6 +93,23 @@ data class TinoA2UiTree(val root: TinoA2UiTreeNode.Column) {
                     actions = node.actions,
                     actionLabels = node.actionLabels,
                     actionPayloads = node.actionPayloads,
+                )
+                is TinoA2UiTreeNode.CatalogListComponent -> A2uiSurfaceComponent(
+                    componentId = "catalog-list-$index",
+                    type = TinoCustomComponentCatalog.CATALOG_LIST_CARD,
+                    props = buildMap {
+                        put("title", node.title)
+                        put("variant", node.variant)
+                        node.emptyMessage?.let { put("emptyMessage", it) }
+                    },
+                    items = node.items,
+                    actions = node.footerActionName?.let(::listOf).orEmpty(),
+                    actionLabels = node.footerActionName
+                        ?.let { mapOf(it to (node.footerActionLabel ?: "Ver todos")) }
+                        .orEmpty(),
+                    actionPayloads = node.footerActionName
+                        ?.let { mapOf(it to node.footerActionPayload) }
+                        .orEmpty(),
                 )
                 is TinoA2UiTreeNode.Button -> A2uiSurfaceComponent(
                     componentId = "button-$index",
@@ -145,10 +172,17 @@ class TinoUiPlanner @Inject constructor() : TinoUiPlannerPort {
             tree = TinoA2UiTree(
                 TinoA2UiTreeNode.Column(
                     buildList {
-                        add(TinoA2UiTreeNode.Text("Produtos cadastrados"))
-                        addAll(value.items.map(::productCard))
-                        add(viewInventoryButton())
-                        if (value.items.isEmpty()) add(TinoA2UiTreeNode.Text(value.emptyMessage ?: "Nenhum produto cadastrado."))
+                        add(
+                            TinoA2UiTreeNode.CatalogListComponent(
+                                title = "Produtos cadastrados",
+                                items = value.items.map(::productItem),
+                                variant = "products",
+                                emptyMessage = value.emptyMessage ?: "Nenhum produto cadastrado.",
+                                footerActionName = CoreTinoComponentCatalog.SELECT_TAB.name,
+                                footerActionLabel = "Ver estoque",
+                                footerActionPayload = mapOf("tab" to "STOCK"),
+                            ),
+                        )
                     },
                 ),
             ),
@@ -159,10 +193,17 @@ class TinoUiPlanner @Inject constructor() : TinoUiPlannerPort {
             tree = TinoA2UiTree(
                 TinoA2UiTreeNode.Column(
                     buildList {
-                        add(TinoA2UiTreeNode.Text("Produtos para repor"))
-                        addAll(value.items.map(::inventoryAlertCard))
-                        if (value.items.isNotEmpty()) add(viewInventoryButton())
-                        if (value.items.isEmpty()) add(TinoA2UiTreeNode.Text(value.emptyMessage ?: "Nenhum produto precisa de reposição."))
+                        add(
+                            TinoA2UiTreeNode.CatalogListComponent(
+                                title = "Produtos para repor",
+                                items = value.items.map(::productItem),
+                                variant = "replenishment",
+                                emptyMessage = value.emptyMessage ?: "Nenhum produto precisa de reposição.",
+                                footerActionName = if (value.items.isNotEmpty()) CoreTinoComponentCatalog.SELECT_TAB.name else null,
+                                footerActionLabel = "Ver estoque",
+                                footerActionPayload = mapOf("tab" to "STOCK"),
+                            ),
+                        )
                     },
                 ),
             ),
@@ -173,23 +214,27 @@ class TinoUiPlanner @Inject constructor() : TinoUiPlannerPort {
             tree = TinoA2UiTree(
                 TinoA2UiTreeNode.Column(
                     buildList {
-                        add(TinoA2UiTreeNode.Text("Clientes cadastrados"))
-                        addAll(value.items.map { item ->
-                            TinoA2UiTreeNode.CatalogComponent(
-                                type = TinoCustomComponentCatalog.CUSTOMER_CARD,
-                                props = mapOf(
-                                    "icon" to "customer",
-                                    "title" to item.name,
-                                    "context" to "Cadastro",
-                                    "supportingText" to (item.phone?.takeIf { it.isNotBlank() } ?: "Sem telefone"),
-                                    "status" to "NORMAL",
-                                ),
-                                actions = listOf("request_details"),
-                                actionLabels = mapOf("request_details" to "Ver detalhes"),
-                                actionPayloads = mapOf("request_details" to mapOf("entityId" to item.id)),
-                            )
-                        })
-                        if (value.items.isEmpty()) add(TinoA2UiTreeNode.Text(value.emptyMessage ?: "Nenhum cliente cadastrado."))
+                        add(
+                            TinoA2UiTreeNode.CatalogListComponent(
+                                title = "Clientes cadastrados",
+                                items = value.items.map { item ->
+                                    A2uiCatalogItem(
+                                        itemId = item.id,
+                                        iconKey = "customer",
+                                        title = item.name,
+                                        context = "Cadastro",
+                                        primaryText = "Cliente",
+                                        secondaryText = item.phone?.takeIf { it.isNotBlank() },
+                                        status = "NORMAL",
+                                        actionName = "request_details",
+                                        actionLabel = "Ver detalhes",
+                                        actionPayload = mapOf("entityId" to item.id),
+                                    )
+                                },
+                                variant = "customers",
+                                emptyMessage = value.emptyMessage ?: "Nenhum cliente cadastrado.",
+                            ),
+                        )
                     },
                 ),
             ),
@@ -213,9 +258,23 @@ class TinoUiPlanner @Inject constructor() : TinoUiPlannerPort {
                                     ),
                                 ),
                             )
-                            addAll(value.items.map { item -> debtCard(item.customerId, item.customerName, item.balanceCents) })
+                            add(
+                                TinoA2UiTreeNode.CatalogListComponent(
+                                    title = "Contas em aberto",
+                                    items = value.items.map { item -> debtItem(item.customerId, item.customerName, item.balanceCents) },
+                                    variant = "receivables",
+                                    emptyMessage = "Ninguém está devendo no momento.",
+                                ),
+                            )
                         } else {
-                            add(TinoA2UiTreeNode.Text(value.emptyMessage ?: "Ninguém está devendo no momento."))
+                            add(
+                                TinoA2UiTreeNode.CatalogListComponent(
+                                    title = "Contas em aberto",
+                                    items = emptyList(),
+                                    variant = "receivables",
+                                    emptyMessage = value.emptyMessage ?: "Ninguém está devendo no momento.",
+                                ),
+                            )
                         }
                     },
                 ),
@@ -269,43 +328,31 @@ class TinoUiPlanner @Inject constructor() : TinoUiPlannerPort {
             ),
         )
 
-    private fun productCard(item: ProductListItem): TinoA2UiTreeNode.CatalogComponent =
-        TinoA2UiTreeNode.CatalogComponent(
-            type = TinoCustomComponentCatalog.PRODUCT_CARD,
-            props = mapOf(
-                "icon" to "inventory",
-                "title" to item.name,
-                "context" to "Estoque",
-                "value" to stock(item),
-                "supportingText" to stockStatus(item.stockQuantity),
-                "status" to if (item.stockQuantity <= 0) "OUT_OF_STOCK" else "NORMAL",
-            ),
-            actions = listOf("request_details"),
-            actionLabels = mapOf("request_details" to "Ver detalhes"),
-            actionPayloads = mapOf("request_details" to mapOf("entityId" to item.id)),
-        )
+    private fun productItem(item: ProductListItem) = A2uiCatalogItem(
+        itemId = item.id,
+        iconKey = "inventory",
+        title = item.name,
+        context = "Estoque",
+        primaryText = stock(item),
+        supportingText = stockStatus(item.stockQuantity, item.stockTracked),
+        status = if (!item.stockTracked || item.stockQuantity > 0) "AVAILABLE" else "OUT_OF_STOCK",
+        actionName = "request_details",
+        actionLabel = "Ver detalhes",
+        actionPayload = mapOf("entityId" to item.id),
+    )
 
-    private fun inventoryAlertCard(item: ProductListItem): TinoA2UiTreeNode.CatalogComponent =
-        productCard(item).copy(
-            type = TinoCustomComponentCatalog.INVENTORY_ALERT_CARD,
-            props = productCard(item).props + ("supportingText" to stockStatus(item.stockQuantity)),
-        )
-
-    private fun debtCard(id: String, name: String, balanceCents: Long) =
-        TinoA2UiTreeNode.CatalogComponent(
-            type = TinoCustomComponentCatalog.DEBT_CARD,
-            props = mapOf(
-                "icon" to "customer",
-                "title" to name,
-                "context" to "Fiado",
-                "value" to money(balanceCents),
-                "supportingText" to "Em aberto",
-                "status" to "OPEN",
-            ),
-            actions = listOf("request_details"),
-            actionLabels = mapOf("request_details" to "Ver detalhes"),
-            actionPayloads = mapOf("request_details" to mapOf("entityId" to id)),
-        )
+    private fun debtItem(id: String, name: String, balanceCents: Long) = A2uiCatalogItem(
+        itemId = id,
+        iconKey = "customer",
+        title = name,
+        context = "Fiado",
+        primaryText = money(balanceCents),
+        status = "OPEN",
+        supportingText = "Em aberto",
+        actionName = "request_details",
+        actionLabel = "Ver detalhes",
+        actionPayload = mapOf("entityId" to id),
+    )
 
     private fun viewInventoryButton() = TinoA2UiTreeNode.Button(
         label = "Ver estoque",
@@ -314,9 +361,10 @@ class TinoUiPlanner @Inject constructor() : TinoUiPlannerPort {
     )
 
     private fun stock(item: ProductListItem): String =
-        "${item.stockQuantity} ${item.unit}${if (item.stockQuantity == 1) "" else "s"}"
+        if (item.stockTracked) "${item.stockQuantity} ${item.unit}${if (item.stockQuantity == 1) "" else "s"}" else "Feito sob demanda"
 
-    private fun stockStatus(quantity: Int): String = when {
+    private fun stockStatus(quantity: Int, stockTracked: Boolean = true): String = when {
+        !stockTracked -> "Sem controle de estoque"
         quantity <= 0 -> "Estoque zerado"
         quantity <= 6 -> "Estoque baixo"
         else -> "Disponível"

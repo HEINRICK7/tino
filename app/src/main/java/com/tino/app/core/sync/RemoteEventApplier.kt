@@ -53,7 +53,11 @@ class RemoteEventApplier @Inject constructor(
             "inventory.purchase.received" -> { applyFiscalStockReceipt(event, payload); true }
             "credit.payment.received" -> { applyCreditPayment(event, payload); true }
             "credit.payment.reversed" -> { applyCreditPaymentReversal(event, payload); true }
-            "purchase.created" -> { applyPurchase(event, payload); true }
+            "credit.adjustment.created" -> { applyCreditAdjustment(event, payload); true }
+            "credit.entry.disputed" -> { applyCreditDispute(event, payload); true }
+            "credit.settled" -> { applyCreditSettlement(event, payload); true }
+            "purchase.created", "purchase.ordered" -> { applyPurchase(event, payload); true }
+            "purchase.received" -> { applyPurchaseReceived(event, payload); true }
             "fiscal.import.committed" -> { applyFiscalImportMarker(event, payload); true }
             // credit.sale.created is represented by the credit entry created with sale.created.
             else -> false
@@ -180,6 +184,8 @@ class RemoteEventApplier @Inject constructor(
                         event.occurredAt,
                         "credit",
                         payload.optionalLong("due_at"),
+                        payload.optString("ledger_type", "PURCHASE"),
+                        payload.optString("provenance").ifBlank { null },
                     ),
                 )
             }
@@ -297,6 +303,10 @@ class RemoteEventApplier @Inject constructor(
                     null,
                     event.occurredAt,
                     payload.optString("payment_method", "unknown"),
+                    null,
+                    payload.optString("ledger_type", "PAYMENT"),
+                    payload.optString("provenance").ifBlank { null },
+                    payload.optString("reason").ifBlank { null },
                 ),
             )
         }
@@ -317,6 +327,9 @@ class RemoteEventApplier @Inject constructor(
                 referenceId = originalPaymentId,
                 occurredAt = event.occurredAt,
                 paymentMethod = "credit",
+                ledgerType = payload.optString("ledger_type", "REVERSAL"),
+                provenance = payload.optString("provenance").ifBlank { null },
+                reason = payload.optString("reason").ifBlank { null },
             ),
         )
     }
@@ -334,12 +347,81 @@ class RemoteEventApplier @Inject constructor(
                 occurredAt = event.occurredAt,
                 paymentMethod = "credit",
                 dueAt = payload.optionalLong("due_at"),
+                ledgerType = payload.optString("ledger_type", "PURCHASE"),
+                provenance = payload.optString("provenance").ifBlank { null },
+            ),
+        )
+    }
+
+    private suspend fun applyCreditAdjustment(event: DomainEventEntity, payload: JSONObject) {
+        val entryId = payload.optString("entry_id").ifBlank { event.aggregateId }
+        if (database.creditDao().findById(entryId) != null) return
+        database.creditDao().insert(
+            CreditEntryEntity(
+                id = entryId,
+                customerId = payload.getString("customer_id"),
+                amountCents = payload.getLong("amount_cents"),
+                type = CreditEntryType.SALE,
+                referenceId = null,
+                occurredAt = event.occurredAt,
+                paymentMethod = "credit",
+                ledgerType = payload.optString("ledger_type", "ADJUSTMENT"),
+                provenance = payload.optString("provenance").ifBlank { null },
+                reason = payload.optString("reason").ifBlank { null },
+            ),
+        )
+    }
+
+    private suspend fun applyCreditDispute(event: DomainEventEntity, payload: JSONObject) {
+        val entryId = payload.optString("dispute_id").ifBlank { event.aggregateId }
+        if (database.creditDao().findById(entryId) != null) return
+        database.creditDao().insert(
+            CreditEntryEntity(
+                id = entryId,
+                customerId = payload.getString("customer_id"),
+                amountCents = 0,
+                type = CreditEntryType.SALE,
+                referenceId = payload.getString("entry_id"),
+                occurredAt = event.occurredAt,
+                paymentMethod = "credit",
+                ledgerType = payload.optString("ledger_type", "DISPUTE"),
+                provenance = payload.optString("provenance").ifBlank { null },
+                reason = payload.optString("reason").ifBlank { null },
+            ),
+        )
+    }
+
+    private suspend fun applyCreditSettlement(event: DomainEventEntity, payload: JSONObject) {
+        val entryId = payload.optString("entry_id").ifBlank { event.aggregateId }
+        if (database.creditDao().findById(entryId) != null) return
+        database.creditDao().insert(
+            CreditEntryEntity(
+                id = entryId,
+                customerId = payload.getString("customer_id"),
+                amountCents = -payload.getLong("amount_cents"),
+                type = CreditEntryType.SALE,
+                referenceId = null,
+                occurredAt = event.occurredAt,
+                paymentMethod = "credit",
+                ledgerType = payload.optString("ledger_type", "SETTLEMENT"),
+                provenance = payload.optString("provenance").ifBlank { null },
+                reason = payload.optString("reason").ifBlank { null },
             ),
         )
     }
 
     private fun JSONObject.optionalLong(key: String): Long? =
         if (has(key) && !isNull(key)) optLong(key).takeIf { it > 0 } else null
+
+    private suspend fun applyPurchaseReceived(event: DomainEventEntity, payload: JSONObject) {
+        val purchase = database.purchaseDao().findById(event.aggregateId) ?: return
+        if (purchase.status == PurchaseStatus.RECEIVED || purchase.status == PurchaseStatus.COMPLETED) return
+        database.purchaseDao().updateStatus(
+            purchaseId = event.aggregateId,
+            status = PurchaseStatus.RECEIVED,
+            receivedAt = payload.optionalLong("received_at") ?: event.occurredAt,
+        )
+    }
 
     private suspend fun applyPurchase(event: DomainEventEntity, payload: JSONObject) {
         if (database.purchaseDao().findById(event.aggregateId) != null) return
@@ -351,6 +433,11 @@ class RemoteEventApplier @Inject constructor(
                 PurchaseStatus.valueOf(payload.getString("status")),
                 payload.getLong("total_cost_cents"),
                 event.occurredAt,
+                payload.optionalLong("expected_delivery_at"),
+                payload.optionalLong("received_at")?.takeIf {
+                    PurchaseStatus.valueOf(payload.getString("status")) == PurchaseStatus.RECEIVED ||
+                        PurchaseStatus.valueOf(payload.getString("status")) == PurchaseStatus.COMPLETED
+                },
             ),
         )
         val items = payload.optJSONArray("items")

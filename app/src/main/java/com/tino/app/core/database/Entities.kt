@@ -10,6 +10,21 @@ data class ProductEntity(
     val priceCents: Long,
     val unit: String,
     val createdAt: Long,
+    val gtin: String? = null,
+    val stockTracked: Boolean = true,
+)
+
+@Entity(tableName = "catalog_sync_state")
+data class CatalogSyncStateEntity(
+    @androidx.room.PrimaryKey val businessId: String,
+    val status: String,
+    val lastSuccessfulAt: Long?,
+    val completedAt: Long?,
+    val total: Int,
+    val accepted: Int,
+    val rejected: Int,
+    val possiblyPartial: Boolean,
+    val errorMessage: String?,
 )
 
 @Entity(tableName = "sales")
@@ -90,6 +105,72 @@ data class FiscalImportEntity(
     val originalXml: ByteArray,
 )
 
+/** Durable remote receiving operation. It stores replay identity and payload, never fiscal raw data. */
+@Entity(
+    tableName = "goods_receipt_operations",
+    indices = [
+        Index(value = ["businessId", "operationType", "logicalReference"], unique = true),
+        Index("status"),
+        Index("receiptId", unique = true),
+    ],
+)
+data class GoodsReceiptOperationEntity(
+    @androidx.room.PrimaryKey val operationId: String,
+    val businessId: String,
+    val operationType: String,
+    val logicalReference: String,
+    val idempotencyKey: String,
+    val documentId: String?,
+    val previewId: String?,
+    val receiptId: String?,
+    val requestJson: String?,
+    val status: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
+@Entity(tableName = "remote_goods_receipts")
+data class RemoteGoodsReceiptEntity(
+    @androidx.room.PrimaryKey val receiptId: String,
+    val businessId: String,
+    val previewId: String?,
+    val documentId: String?,
+    val status: String,
+    val itemCount: Int,
+    val projectedAt: Long,
+)
+
+@Entity(
+    tableName = "remote_goods_receipt_items",
+    primaryKeys = ["receiptId", "lineNumber"],
+    indices = [Index("localProductId"), Index("remoteProductId")],
+)
+data class RemoteGoodsReceiptItemEntity(
+    val receiptId: String,
+    val lineNumber: Int,
+    val remoteProductId: String,
+    val localProductId: String,
+    val productName: String,
+    val baseUnit: String,
+    /** Decimal wire value retained as canonical plain text; never converted to Int/Double. */
+    val quantityAdded: String,
+    /** Decimal wire value retained as canonical plain text; never converted to cents. */
+    val unitCost: String,
+    val projectedAt: Long,
+)
+
+@Entity(
+    tableName = "remote_product_mappings",
+    indices = [Index(value = ["businessId", "remoteProductId"], unique = true), Index("localProductId")],
+)
+data class RemoteProductMappingEntity(
+    @androidx.room.PrimaryKey val mappingId: String,
+    val businessId: String,
+    val remoteProductId: String,
+    val localProductId: String,
+    val createdAt: Long,
+)
+
 @Entity(tableName = "supplier_product_mappings", indices = [Index("supplierId"), Index("productId")])
 data class SupplierProductMappingEntity(
     @androidx.room.PrimaryKey val id: String,
@@ -127,6 +208,11 @@ data class CreditEntryEntity(
     val occurredAt: Long,
     val paymentMethod: String = "unknown",
     val dueAt: Long? = null,
+    /** Semantic Shared Ledger type; null keeps legacy rows backward compatible. */
+    val ledgerType: String? = null,
+    /** JSON encoded LedgerProvenance. Kept nullable for legacy data. */
+    val provenance: String? = null,
+    val reason: String? = null,
 )
 
 enum class PurchaseStatus { DRAFT, ORDERED, RECEIVED, COMPLETED }
@@ -138,6 +224,8 @@ data class PurchaseEntity(
     val status: PurchaseStatus,
     val totalCostCents: Long,
     val createdAt: Long,
+    val expectedDeliveryAt: Long? = null,
+    val receivedAt: Long? = null,
 )
 
 @Entity(tableName = "purchase_items", primaryKeys = ["purchaseId", "lineNumber"])
@@ -190,6 +278,64 @@ data class RecommendationEntity(
     val quality: String = "COMPLETE",
     val featureVersion: String = "inventory-features-v1",
     val modelVersion: String = "local-heuristic-v1",
+)
+
+@Entity(
+    tableName = "attention_items",
+    indices = [Index("state"), Index("lastSeenAtEpochMs"), Index("subjectId")],
+)
+data class AttentionEntity(
+    @androidx.room.PrimaryKey val id: String,
+    val insightId: String,
+    val subjectId: String?,
+    val title: String,
+    val explanation: String,
+    val evidenceIdsJson: String,
+    val relevance: Int,
+    val urgency: Int,
+    val confidence: Double,
+    val state: String,
+    val snoozedUntilEpochMs: Long?,
+    val createdAtEpochMs: Long,
+    val lastSeenAtEpochMs: Long,
+)
+
+@Entity(
+    tableName = "intelligence_evidence",
+    indices = [Index("subjectId"), Index("detectedAtEpochMs"), Index("type")],
+)
+data class IntelligenceEvidenceEntity(
+    @androidx.room.PrimaryKey val id: String,
+    val type: String,
+    val subjectId: String?,
+    val factsJson: String,
+    val source: String,
+    val confidence: Double,
+    val occurredAtEpochMs: Long?,
+    val detectedAtEpochMs: Long,
+)
+
+/** Durable, reviewed knowledge catalogs; transactional commerce facts stay elsewhere. */
+@Entity(
+    tableName = "approved_knowledge_catalogs",
+    indices = [androidx.room.Index("state")],
+)
+data class ApprovedKnowledgeCatalogEntity(
+    @androidx.room.PrimaryKey val version: String,
+    val payloadJson: String,
+    val activatedAtEpochMs: Long,
+    val state: String,
+)
+
+@Entity(
+    tableName = "attention_outcomes",
+    indices = [Index("attentionId"), Index("occurredAtEpochMs"), Index("outcome")],
+)
+data class AttentionOutcomeEntity(
+    @androidx.room.PrimaryKey val id: String,
+    val attentionId: String,
+    val outcome: String,
+    val occurredAtEpochMs: Long,
 )
 
 @Entity(

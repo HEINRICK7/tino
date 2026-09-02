@@ -10,8 +10,10 @@ class CanonicalCapabilityContractTest {
     fun priorityCapabilitiesDeclareOneCanonicalContract() {
         val queries = listOf(
             TinoCapabilityId.LIST_PRODUCTS,
+            TinoCapabilityId.GET_CUSTOMER_CONTACT,
             TinoCapabilityId.GET_PRODUCT_STOCK,
             TinoCapabilityId.GET_PRODUCT_PRICE,
+            TinoCapabilityId.LIST_SUPPLIERS,
             TinoCapabilityId.LIST_RECEIVABLES,
             TinoCapabilityId.LIST_OVERDUE,
         )
@@ -20,7 +22,7 @@ class CanonicalCapabilityContractTest {
             assertEquals(TinoCapabilityType.QUERY, definition.type)
             assertEquals(TinoConfirmationPolicy.NONE, definition.confirmation)
             assertTrue(definition.offline)
-            assertFalse(definition.sourceOfTruth.contains("Gemma", ignoreCase = true))
+            assertFalse(definition.sourceOfTruth.contains("modelo local", ignoreCase = true))
         }
     }
 
@@ -34,6 +36,31 @@ class CanonicalCapabilityContractTest {
         assertTrue(definition.operationIdRequired)
         assertTrue(definition.offline)
         assertEquals("CreditLedger", definition.sourceOfTruth)
+    }
+
+    @Test
+    fun customerCreationIsAConfirmedOfflineMutation() {
+        val definition = TinoCapabilityRegistry.require(TinoCapabilityId.CREATE_CUSTOMER)
+
+        assertEquals(TinoCapabilityType.MUTATION, definition.type)
+        assertEquals(TinoCapabilityRisk.MEDIUM, definition.risk)
+        assertEquals(TinoConfirmationPolicy.REQUIRED, definition.confirmation)
+        assertTrue(definition.operationIdRequired)
+        assertTrue(definition.offline)
+        assertEquals("CustomerRepository", definition.sourceOfTruth)
+    }
+
+    @Test
+    fun stockEntryIsAConfirmedOfflineMutationWithCanonicalPreview() {
+        val definition = TinoCapabilityRegistry.require(TinoCapabilityId.REGISTER_STOCK_ENTRY)
+
+        assertEquals(TinoCapabilityType.MUTATION, definition.type)
+        assertEquals(TinoCapabilityRisk.MEDIUM, definition.risk)
+        assertEquals(TinoConfirmationPolicy.REQUIRED, definition.confirmation)
+        assertTrue(definition.operationIdRequired)
+        assertTrue(definition.offline)
+        assertEquals("CommerceRepository / Room", definition.sourceOfTruth)
+        assertEquals("stock_entry_preview", definition.a2uiComponent)
     }
 
     @Test
@@ -58,6 +85,26 @@ class CanonicalCapabilityContractTest {
         assertEquals(
             TinoToolId.LIST_CUSTOMERS,
             TinoToolCatalog.descriptorFor(TinoCapabilityId.LIST_CUSTOMERS).id,
+        )
+        assertEquals(
+            TinoToolId.LIST_SUPPLIERS,
+            TinoToolCatalog.descriptorFor(TinoCapabilityId.LIST_SUPPLIERS).id,
+        )
+        assertEquals(
+            TinoToolId.CUSTOMER_CONTACT,
+            TinoToolCatalog.descriptorFor(TinoCapabilityId.GET_CUSTOMER_CONTACT).id,
+        )
+        assertEquals(
+            TinoToolId.CUSTOMER_CREATE,
+            TinoToolCatalog.descriptorFor(TinoCapabilityId.CREATE_CUSTOMER).id,
+        )
+        assertEquals(
+            TinoToolId.PRODUCT_PRICE_UPDATE,
+            TinoToolCatalog.descriptorFor(TinoCapabilityId.CHANGE_PRODUCT_PRICE).id,
+        )
+        assertEquals(
+            TinoToolId.STOCK_ENTRY,
+            TinoToolCatalog.descriptorFor(TinoCapabilityId.REGISTER_STOCK_ENTRY).id,
         )
     }
 }

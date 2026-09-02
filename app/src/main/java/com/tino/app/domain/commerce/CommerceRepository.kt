@@ -13,6 +13,7 @@ import com.tino.app.core.database.CreditEntryEntity
 import com.tino.app.core.database.CreditEntryType
 import com.tino.app.core.database.ProductDao
 import com.tino.app.core.database.ProductEntity
+import com.tino.app.core.database.ProductPurchaseHistoryEntity
 import com.tino.app.core.database.ProductSummary
 import com.tino.app.core.database.SaleDao
 import com.tino.app.core.database.SaleEntity
@@ -21,6 +22,7 @@ import com.tino.app.core.database.StockMovementDao
 import com.tino.app.core.database.StockMovementEntity
 import com.tino.app.core.database.SupplierDao
 import com.tino.app.core.database.SupplierEntity
+import com.tino.app.core.database.SupplierProductMappingEntity
 import com.tino.app.core.database.PurchaseDao
 import com.tino.app.core.database.PurchaseEntity
 import com.tino.app.core.database.PurchaseItemEntity
@@ -32,8 +34,10 @@ import com.tino.app.core.database.OrderItemEntity
 import com.tino.app.core.sync.SyncScheduler
 import com.tino.app.core.database.TinoDatabase
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import org.json.JSONObject
+import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.ZoneId
 import javax.inject.Inject
@@ -58,7 +62,22 @@ class CommerceRepository @Inject constructor(
         val reversalOperationId: String,
         val correctedPaymentOperationId: String,
     )
-    fun observeProducts(): Flow<List<ProductSummary>> = productDao.observeAll()
+    fun observeProducts(): Flow<List<ProductSummary>> = combine(
+        productDao.observeAll(),
+        database.remoteGoodsReceiptDao().observeItems(identityProvider.current().storeId),
+    ) { products, remoteItems ->
+        val remoteByProduct = remoteItems.groupBy { it.localProductId }.mapValues { (_, items) ->
+            items.fold(BigDecimal.ZERO) { total, item -> total + BigDecimal(item.quantityAdded) }
+        }
+        products.map { product ->
+            product.copy(
+                stockQuantityExact = BigDecimal(product.stockQuantityExact)
+                    .add(remoteByProduct[product.id] ?: BigDecimal.ZERO)
+                    .stripTrailingZeros()
+                    .toPlainString(),
+            )
+        }
+    }
 
     fun observeOrders(): Flow<List<OrderSummary>> = database.orderDao().observeAll()
 
@@ -117,7 +136,62 @@ class CommerceRepository @Inject constructor(
 
     suspend fun creditEntriesForTimeline(): List<CreditEntryEntity> = creditDao.all()
 
+    /**
+     * Returns the shared-ledger projection for one customer. Consumers receive
+     * derived state; persisted credit entries remain the immutable facts.
+     */
+    suspend fun sharedLedgerProjection(customerId: String): SharedLedgerProjection {
+        customerDao.findById(customerId) ?: error("Cliente não encontrado.")
+        return SharedLedgerProjector.project(
+            customerId = customerId,
+            events = creditDao.all().map(SharedLedgerProjector::fromCreditEntry),
+        )
+    }
+
+    suspend fun sharedLedgerStatement(customerId: String): SharedLedgerStatement {
+        val customer = customerDao.findById(customerId) ?: error("Cliente não encontrado.")
+        val projection = sharedLedgerProjection(customerId)
+        return SharedLedgerStatement(
+            customerId = customerId,
+            customerName = customer.name,
+            balanceCents = projection.balanceCents,
+            entries = projection.events.map { event ->
+                SharedLedgerStatementEntry(
+                    id = event.id,
+                    type = event.type,
+                    signedAmountCents = event.signedAmountCents,
+                    occurredAtEpochMs = event.occurredAtEpochMs,
+                    reason = event.reason,
+                    source = event.provenance?.source,
+                    paymentMethod = event.paymentMethod,
+                )
+            },
+        )
+    }
+
+    /** Reads all customer projections from the same event stream and keeps customer isolation explicit. */
+    suspend fun allSharedLedgerProjections(): List<SharedLedgerProjection> {
+        val eventsByCustomer = creditDao.all()
+            .map(SharedLedgerProjector::fromCreditEntry)
+            .groupBy(SharedLedgerEvent::customerId)
+        return customerDao.all().map { customer ->
+            SharedLedgerProjector.project(customer.id, eventsByCustomer[customer.id].orEmpty())
+        }
+    }
+
     suspend fun stockMovementsForIntelligence(): List<StockMovementEntity> = stockMovementDao.all()
+
+    suspend fun supplierProductMappingsForIntelligence(): List<SupplierProductMappingEntity> =
+        database.supplierProductMappingDao().all()
+
+    suspend fun productPurchaseHistoryForIntelligence(): List<ProductPurchaseHistoryEntity> =
+        database.productPurchaseHistoryDao().all()
+
+    suspend fun purchasesForIntelligence(): List<PurchaseEntity> = purchaseDao.all()
+
+    fun observeSupplierPurchases(): Flow<List<PurchaseEntity>> = purchaseDao.observeAll()
+
+    suspend fun purchaseItemsForIntelligence(): List<PurchaseItemEntity> = purchaseDao.allItems()
 
     suspend fun resolveProductByName(name: String): EntityResolution<ProductEntity> =
         resolve(productDao.findByName(name), productDao.searchByName("%${name.trim()}%"))
@@ -237,15 +311,18 @@ class CommerceRepository @Inject constructor(
                 quantity = quantity,
                 availableStock = stockMovementDao.balance(productId),
                 productName = product.name,
+                stockTracked = product.stockTracked,
             )
             val now = System.currentTimeMillis()
             val saleId = UuidV7.new()
             val identity = identityProvider.current()
             saleDao.insert(SaleEntity(saleId, totalCents, paymentMethod.storageValue, now))
             saleDao.insertItems(listOf(SaleItemEntity(saleId, 0, productId, quantity, product.priceCents)))
-            stockMovementDao.insert(
-                StockMovementEntity(UuidV7.new(), productId, -quantity, "sale", saleId, now),
-            )
+            if (product.stockTracked) {
+                stockMovementDao.insert(
+                    StockMovementEntity(UuidV7.new(), productId, -quantity, "sale", saleId, now),
+                )
+            }
             database.domainEventDao().insert(
                 event(
                     identity = identity,
@@ -319,7 +396,7 @@ class CommerceRepository @Inject constructor(
         return operationId
     }
 
-    suspend fun createCustomer(name: String, phone: String? = null) {
+    suspend fun createCustomer(name: String, phone: String? = null): String {
         require(name.isNotBlank()) { "Informe o nome do cliente." }
         val id = UuidV7.new()
         val now = System.currentTimeMillis()
@@ -332,6 +409,7 @@ class CommerceRepository @Inject constructor(
             )
         }
         syncScheduler.schedule()
+        return id
     }
 
     suspend fun updateCustomer(customerId: String, name: String, phone: String? = null) {
@@ -373,6 +451,7 @@ class CommerceRepository @Inject constructor(
         productId: String,
         quantity: Int,
         dueAt: Long? = null,
+        provenance: LedgerProvenance = defaultMerchantProvenance(),
     ) {
         require(dueAt == null || dueAt > 0) { "O vencimento informado não é válido." }
         database.withTransaction {
@@ -383,6 +462,7 @@ class CommerceRepository @Inject constructor(
                 quantity = quantity,
                 availableStock = stockMovementDao.balance(productId),
                 productName = product.name,
+                stockTracked = product.stockTracked,
             )
             val now = System.currentTimeMillis()
             val saleId = UuidV7.new()
@@ -390,7 +470,9 @@ class CommerceRepository @Inject constructor(
             val creditEntryId = UuidV7.new()
             saleDao.insert(SaleEntity(saleId, totalCents, "credit", now))
             saleDao.insertItems(listOf(SaleItemEntity(saleId, 0, productId, quantity, product.priceCents)))
-            stockMovementDao.insert(StockMovementEntity(UuidV7.new(), productId, -quantity, "credit_sale", saleId, now))
+            if (product.stockTracked) {
+                stockMovementDao.insert(StockMovementEntity(UuidV7.new(), productId, -quantity, "credit_sale", saleId, now))
+            }
             creditDao.insert(
                 CreditEntryEntity(
                     creditEntryId,
@@ -401,6 +483,8 @@ class CommerceRepository @Inject constructor(
                     now,
                     PaymentMethod.CREDIT.storageValue,
                     dueAt,
+                    SharedLedgerEventType.PURCHASE.name,
+                    LedgerProvenanceCodec.encode(provenance),
                 ),
             )
             database.domainEventDao().insert(
@@ -409,7 +493,9 @@ class CommerceRepository @Inject constructor(
                     .put("quantity", quantity).put("unit_price_cents", product.priceCents)
                     .put("total_cents", totalCents).put("payment_method", "credit")
                     .putOpt("due_at", dueAt)
-                    .put("credit_entry_id", creditEntryId)),
+                    .put("credit_entry_id", creditEntryId)
+                    .put("ledger_type", SharedLedgerEventType.PURCHASE.name)
+                    .putOpt("provenance", LedgerProvenanceCodec.encode(provenance))),
             )
             database.domainEventDao().insert(
                 event(identity, customer.id, "credit.sale.created", now, JSONObject()
@@ -425,6 +511,7 @@ class CommerceRepository @Inject constructor(
         amountCents: Long,
         operationId: String = UuidV7.new(),
         dueAt: Long? = null,
+        provenance: LedgerProvenance = defaultMerchantProvenance(),
     ): String {
         require(amountCents > 0) { "O fiado precisa ser maior que zero." }
         require(dueAt == null || dueAt > 0) { "O vencimento informado não é válido." }
@@ -454,6 +541,8 @@ class CommerceRepository @Inject constructor(
                     occurredAt = now,
                     paymentMethod = PaymentMethod.CREDIT.storageValue,
                     dueAt = dueAt,
+                    ledgerType = SharedLedgerEventType.PURCHASE.name,
+                    provenance = LedgerProvenanceCodec.encode(provenance),
                 ),
             )
             database.domainEventDao().insert(
@@ -467,7 +556,9 @@ class CommerceRepository @Inject constructor(
                         .put("operation_id", operationId)
                         .put("customer_id", customerId)
                         .put("amount_cents", amountCents)
-                        .putOpt("due_at", dueAt),
+                        .putOpt("due_at", dueAt)
+                        .put("ledger_type", SharedLedgerEventType.PURCHASE.name)
+                        .putOpt("provenance", LedgerProvenanceCodec.encode(provenance)),
                 ),
             )
         }
@@ -480,6 +571,7 @@ class CommerceRepository @Inject constructor(
         amountCents: Long,
         paymentMethod: PaymentMethod = PaymentMethod.UNKNOWN,
         operationId: String = UuidV7.new(),
+        provenance: LedgerProvenance = defaultMerchantProvenance(),
     ): String {
         require(amountCents > 0) { "O pagamento precisa ser maior que zero." }
         require(paymentMethod != PaymentMethod.CREDIT && paymentMethod != PaymentMethod.UNKNOWN) {
@@ -510,6 +602,8 @@ class CommerceRepository @Inject constructor(
                     referenceId = null,
                     occurredAt = now,
                     paymentMethod = paymentMethod.storageValue,
+                    ledgerType = SharedLedgerEventType.PAYMENT.name,
+                    provenance = LedgerProvenanceCodec.encode(provenance),
                 ),
             )
             database.domainEventDao().insert(
@@ -518,7 +612,171 @@ class CommerceRepository @Inject constructor(
                     .put("amount_cents", amountCents)
                     .put("entry_id", operationId)
                     .put("operation_id", operationId)
-                    .put("payment_method", paymentMethod.storageValue)),
+                    .put("payment_method", paymentMethod.storageValue)
+                    .put("ledger_type", SharedLedgerEventType.PAYMENT.name)
+                    .putOpt("provenance", LedgerProvenanceCodec.encode(provenance))),
+            )
+        }
+        syncScheduler.schedule()
+        return operationId
+    }
+
+    /**
+     * Appends a justified adjustment. A negative adjustment reduces the open
+     * balance; a positive adjustment adds to it. The original entries remain
+     * untouched.
+     */
+    suspend fun registerCreditAdjustment(
+        customerId: String,
+        amountCents: Long,
+        reason: String,
+        operationId: String = UuidV7.new(),
+        provenance: LedgerProvenance = defaultMerchantProvenance(),
+    ): String {
+        require(amountCents != 0L) { "O ajuste não pode ser zero." }
+        require(reason.isNotBlank()) { "O motivo do ajuste é obrigatório." }
+        database.withTransaction {
+            customerDao.findById(customerId) ?: error("Cliente não encontrado.")
+            creditDao.findById(operationId)?.let { existing ->
+                check(
+                    existing.customerId == customerId &&
+                        existing.amountCents == amountCents &&
+                        existing.ledgerType == SharedLedgerEventType.ADJUSTMENT.name &&
+                        existing.reason == reason.trim(),
+                ) { "A operationId já está associada a outro ajuste." }
+                return@withTransaction
+            }
+            if (amountCents < 0) {
+                check(creditDao.balance(customerId) + amountCents >= 0) {
+                    "O ajuste não pode deixar o saldo negativo."
+                }
+            }
+            val now = System.currentTimeMillis()
+            creditDao.insert(
+                CreditEntryEntity(
+                    id = operationId,
+                    customerId = customerId,
+                    amountCents = amountCents,
+                    type = CreditEntryType.SALE,
+                    referenceId = null,
+                    occurredAt = now,
+                    paymentMethod = PaymentMethod.CREDIT.storageValue,
+                    ledgerType = SharedLedgerEventType.ADJUSTMENT.name,
+                    provenance = LedgerProvenanceCodec.encode(provenance),
+                    reason = reason.trim(),
+                ),
+            )
+            database.domainEventDao().insert(
+                event(identityProvider.current(), customerId, "credit.adjustment.created", now, JSONObject()
+                    .put("customer_id", customerId)
+                    .put("entry_id", operationId)
+                    .put("amount_cents", amountCents)
+                    .put("reason", reason.trim())
+                    .put("ledger_type", SharedLedgerEventType.ADJUSTMENT.name)
+                    .putOpt("provenance", LedgerProvenanceCodec.encode(provenance))),
+            )
+        }
+        syncScheduler.schedule()
+        return operationId
+    }
+
+    /** Records a contestation without changing the customer's balance. */
+    suspend fun disputeCreditEntry(
+        customerId: String,
+        referencedEntryId: String,
+        reason: String,
+        operationId: String = UuidV7.new(),
+        provenance: LedgerProvenance = defaultMerchantProvenance(),
+    ): String {
+        require(reason.isNotBlank()) { "O motivo da contestação é obrigatório." }
+        database.withTransaction {
+            customerDao.findById(customerId) ?: error("Cliente não encontrado.")
+            val referenced = creditDao.findById(referencedEntryId)
+                ?: error("Lançamento não encontrado.")
+            check(referenced.customerId == customerId) {
+                "O lançamento não pertence a este cliente."
+            }
+            creditDao.findById(operationId)?.let { existing ->
+                check(
+                    existing.customerId == customerId &&
+                        existing.ledgerType == SharedLedgerEventType.DISPUTE.name &&
+                        existing.referenceId == referencedEntryId &&
+                        existing.reason == reason.trim(),
+                ) { "A operationId já está associada a outra contestação." }
+                return@withTransaction
+            }
+            val now = System.currentTimeMillis()
+            creditDao.insert(
+                CreditEntryEntity(
+                    id = operationId,
+                    customerId = customerId,
+                    amountCents = 0,
+                    type = CreditEntryType.SALE,
+                    referenceId = referencedEntryId,
+                    occurredAt = now,
+                    paymentMethod = PaymentMethod.CREDIT.storageValue,
+                    ledgerType = SharedLedgerEventType.DISPUTE.name,
+                    provenance = LedgerProvenanceCodec.encode(provenance),
+                    reason = reason.trim(),
+                ),
+            )
+            database.domainEventDao().insert(
+                event(identityProvider.current(), customerId, "credit.entry.disputed", now, JSONObject()
+                    .put("customer_id", customerId)
+                    .put("entry_id", referencedEntryId)
+                    .put("dispute_id", operationId)
+                    .put("reason", reason.trim())
+                    .put("ledger_type", SharedLedgerEventType.DISPUTE.name)
+                    .putOpt("provenance", LedgerProvenanceCodec.encode(provenance))),
+            )
+        }
+        syncScheduler.schedule()
+        return operationId
+    }
+
+    /** Closes the current receivable by appending a compensating settlement event. */
+    suspend fun settleCredit(
+        customerId: String,
+        reason: String,
+        operationId: String = UuidV7.new(),
+        provenance: LedgerProvenance = defaultMerchantProvenance(),
+    ): String {
+        require(reason.isNotBlank()) { "O motivo da quitação é obrigatório." }
+        database.withTransaction {
+            database.customerDao().findById(customerId) ?: error("Cliente não encontrado.")
+            creditDao.findById(operationId)?.let { existing ->
+                check(
+                    existing.customerId == customerId &&
+                        existing.ledgerType == SharedLedgerEventType.SETTLEMENT.name &&
+                        existing.reason == reason.trim(),
+                ) { "A operationId já está associada a outra quitação." }
+                return@withTransaction
+            }
+            val balance = creditDao.balance(customerId)
+            check(balance > 0) { "O cliente não possui saldo em aberto." }
+            val now = System.currentTimeMillis()
+            creditDao.insert(
+                CreditEntryEntity(
+                    id = operationId,
+                    customerId = customerId,
+                    amountCents = -balance,
+                    type = CreditEntryType.SALE,
+                    referenceId = null,
+                    occurredAt = now,
+                    paymentMethod = PaymentMethod.CREDIT.storageValue,
+                    ledgerType = SharedLedgerEventType.SETTLEMENT.name,
+                    provenance = LedgerProvenanceCodec.encode(provenance),
+                    reason = reason.trim(),
+                ),
+            )
+            database.domainEventDao().insert(
+                event(identityProvider.current(), customerId, "credit.settled", now, JSONObject()
+                    .put("customer_id", customerId)
+                    .put("entry_id", operationId)
+                    .put("amount_cents", balance)
+                    .put("reason", reason.trim())
+                    .put("ledger_type", SharedLedgerEventType.SETTLEMENT.name)
+                    .putOpt("provenance", LedgerProvenanceCodec.encode(provenance))),
             )
         }
         syncScheduler.schedule()
@@ -532,6 +790,7 @@ class CommerceRepository @Inject constructor(
     suspend fun reverseCreditPayment(
         paymentOperationId: String,
         operationId: String = UuidV7.new(),
+        provenance: LedgerProvenance = defaultMerchantProvenance(),
     ): String {
         var effectiveOperationId = operationId
         database.withTransaction {
@@ -563,6 +822,9 @@ class CommerceRepository @Inject constructor(
                     referenceId = paymentOperationId,
                     occurredAt = now,
                     paymentMethod = PaymentMethod.CREDIT.storageValue,
+                    ledgerType = SharedLedgerEventType.REVERSAL.name,
+                    provenance = LedgerProvenanceCodec.encode(provenance),
+                    reason = "PAYMENT_REVERSAL",
                 ),
             )
             database.domainEventDao().insert(
@@ -570,7 +832,10 @@ class CommerceRepository @Inject constructor(
                     .put("customer_id", payment.customerId)
                     .put("original_payment_id", paymentOperationId)
                     .put("compensation_entry_id", effectiveOperationId)
-                    .put("amount_cents", -payment.amountCents)),
+                    .put("amount_cents", -payment.amountCents)
+                    .put("ledger_type", SharedLedgerEventType.REVERSAL.name)
+                    .put("reason", "PAYMENT_REVERSAL")
+                    .putOpt("provenance", LedgerProvenanceCodec.encode(provenance))),
             )
         }
         syncScheduler.schedule()
@@ -584,6 +849,7 @@ class CommerceRepository @Inject constructor(
         paymentMethod: PaymentMethod,
         operationId: String = UuidV7.new(),
         reversalOperationId: String = UuidV7.new(),
+        provenance: LedgerProvenance = defaultMerchantProvenance(),
     ): CorrectedCreditPayment {
         require(amountCents > 0) { "O pagamento corrigido precisa ser maior que zero." }
         require(paymentMethod != PaymentMethod.CREDIT && paymentMethod != PaymentMethod.UNKNOWN) {
@@ -622,6 +888,9 @@ class CommerceRepository @Inject constructor(
                         referenceId = originalPaymentOperationId,
                         occurredAt = now,
                         paymentMethod = PaymentMethod.CREDIT.storageValue,
+                        ledgerType = SharedLedgerEventType.REVERSAL.name,
+                        provenance = LedgerProvenanceCodec.encode(provenance),
+                        reason = "USER_CORRECTION",
                     ),
                 )
                 database.domainEventDao().insert(
@@ -630,7 +899,9 @@ class CommerceRepository @Inject constructor(
                         .put("original_payment_id", originalPaymentOperationId)
                         .put("compensation_entry_id", effectiveReversalId)
                         .put("amount_cents", -original.amountCents)
-                        .put("reason", "USER_CORRECTION")),
+                        .put("reason", "USER_CORRECTION")
+                        .put("ledger_type", SharedLedgerEventType.REVERSAL.name)
+                        .putOpt("provenance", LedgerProvenanceCodec.encode(provenance))),
                 )
             }
             check(creditDao.balance(original.customerId) >= amountCents) {
@@ -645,6 +916,9 @@ class CommerceRepository @Inject constructor(
                     referenceId = originalPaymentOperationId,
                     occurredAt = now,
                     paymentMethod = paymentMethod.storageValue,
+                    ledgerType = SharedLedgerEventType.PAYMENT.name,
+                    provenance = LedgerProvenanceCodec.encode(provenance),
+                    reason = "CORRECTED_PAYMENT",
                 ),
             )
             database.domainEventDao().insert(
@@ -654,7 +928,10 @@ class CommerceRepository @Inject constructor(
                     .put("entry_id", operationId)
                     .put("operation_id", operationId)
                     .put("payment_method", paymentMethod.storageValue)
-                    .put("correction_of", originalPaymentOperationId)),
+                    .put("correction_of", originalPaymentOperationId)
+                    .put("ledger_type", SharedLedgerEventType.PAYMENT.name)
+                    .put("reason", "CORRECTED_PAYMENT")
+                    .putOpt("provenance", LedgerProvenanceCodec.encode(provenance))),
             )
         }
         syncScheduler.schedule()
@@ -663,6 +940,90 @@ class CommerceRepository @Inject constructor(
             reversalOperationId = effectiveReversalId,
             correctedPaymentOperationId = operationId,
         )
+    }
+
+    suspend fun createSupplierOrder(
+        productId: String,
+        quantity: Int,
+        unitCostCents: Long,
+        supplierId: String,
+        expectedDeliveryAt: Long,
+    ): String {
+        require(quantity > 0) { "A quantidade precisa ser maior que zero." }
+        require(unitCostCents >= 0) { "O custo não pode ser negativo." }
+        require(expectedDeliveryAt > System.currentTimeMillis()) { "A entrega prevista precisa estar no futuro." }
+        val purchaseId = database.withTransaction {
+            val product = productDao.findById(productId) ?: error("Produto não encontrado.")
+            supplierDao.findById(supplierId) ?: error("Fornecedor não encontrado.")
+            val now = System.currentTimeMillis()
+            val identity = identityProvider.current()
+            val totalCostCents = unitCostCents * quantity
+            val id = UuidV7.new()
+            purchaseDao.insert(
+                PurchaseEntity(
+                    id = id,
+                    supplierId = supplierId,
+                    status = PurchaseStatus.ORDERED,
+                    totalCostCents = totalCostCents,
+                    createdAt = now,
+                    expectedDeliveryAt = expectedDeliveryAt,
+                ),
+            )
+            purchaseDao.insertItems(listOf(PurchaseItemEntity(id, 0, productId, quantity, unitCostCents)))
+            database.domainEventDao().insert(
+                event(identity, id, "purchase.ordered", now, JSONObject()
+                    .put("purchase_id", id)
+                    .put("supplier_id", supplierId)
+                    .put("product_id", productId)
+                    .put("quantity", quantity)
+                    .put("unit_cost_cents", unitCostCents)
+                    .put("total_cost_cents", totalCostCents)
+                    .put("status", PurchaseStatus.ORDERED.name)
+                    .put("expected_delivery_at", expectedDeliveryAt)),
+            )
+            id
+        }
+        syncScheduler.schedule()
+        return purchaseId
+    }
+
+    suspend fun receiveSupplierOrder(purchaseId: String) {
+        database.withTransaction {
+            val purchase = purchaseDao.findById(purchaseId) ?: error("Pedido de compra não encontrado.")
+            require(purchase.status == PurchaseStatus.ORDERED) { "Este pedido de compra já foi recebido ou encerrado." }
+            val items = purchaseDao.allItems().filter { it.purchaseId == purchaseId }
+            require(items.isNotEmpty()) { "O pedido de compra não possui itens." }
+            val receivedAt = System.currentTimeMillis()
+            val identity = identityProvider.current()
+            purchaseDao.updateStatus(purchaseId, PurchaseStatus.RECEIVED, receivedAt)
+            items.forEach { item ->
+                stockMovementDao.insert(
+                    StockMovementEntity(
+                        id = UuidV7.new(),
+                        productId = item.productId,
+                        quantityDelta = item.quantity,
+                        reason = "purchase_receipt",
+                        referenceId = purchaseId,
+                        occurredAt = receivedAt,
+                    ),
+                )
+                database.domainEventDao().insert(
+                    event(identity, item.productId, "stock.received", receivedAt, JSONObject()
+                        .put("product_id", item.productId)
+                        .put("quantity", item.quantity)
+                        .put("purchase_id", purchaseId)
+                        .put("unit_cost_cents", item.unitCostCents)),
+                )
+            }
+            database.domainEventDao().insert(
+                event(identity, purchaseId, "purchase.received", receivedAt, JSONObject()
+                    .put("purchase_id", purchaseId)
+                    .put("supplier_id", purchase.supplierId)
+                    .put("status", PurchaseStatus.RECEIVED.name)
+                    .put("received_at", receivedAt)),
+            )
+        }
+        syncScheduler.schedule()
     }
 
     suspend fun registerStockReceipt(
@@ -674,7 +1035,8 @@ class CommerceRepository @Inject constructor(
         require(quantity > 0) { "A quantidade precisa ser maior que zero." }
         require(unitCostCents >= 0) { "O custo não pode ser negativo." }
         database.withTransaction {
-            productDao.findById(productId) ?: error("Produto não encontrado.")
+            val product = productDao.findById(productId) ?: error("Produto não encontrado.")
+            check(product.stockTracked) { "Produto sob demanda não possui estoque." }
             supplierId?.let { supplierDao.findById(it) ?: error("Fornecedor não encontrado.") }
             val now = System.currentTimeMillis()
             val identity = identityProvider.current()

@@ -82,6 +82,65 @@ class FinancialProjectionTest {
     }
 
     @Test
+    fun summaryDoesNotClassifyLedgerCompensationsAsNewCredit() = runBlocking {
+        val now = System.currentTimeMillis()
+        database.creditDao().insert(
+            CreditEntryEntity(
+                id = "purchase-ledger",
+                customerId = "joao",
+                amountCents = 1_000,
+                type = CreditEntryType.SALE,
+                referenceId = null,
+                occurredAt = now,
+                paymentMethod = "credit",
+                ledgerType = "PURCHASE",
+            ),
+        )
+        database.creditDao().insert(
+            CreditEntryEntity(
+                id = "adjustment-ledger",
+                customerId = "joao",
+                amountCents = 200,
+                type = CreditEntryType.SALE,
+                referenceId = null,
+                occurredAt = now,
+                paymentMethod = "credit",
+                ledgerType = "ADJUSTMENT",
+            ),
+        )
+        database.creditDao().insert(
+            CreditEntryEntity(
+                id = "reversal-ledger",
+                customerId = "joao",
+                amountCents = 300,
+                type = CreditEntryType.SALE,
+                referenceId = "payment-old",
+                occurredAt = now,
+                paymentMethod = "credit",
+                ledgerType = "REVERSAL",
+            ),
+        )
+        database.creditDao().insert(
+            CreditEntryEntity(
+                id = "settlement-ledger",
+                customerId = "joao",
+                amountCents = -100,
+                type = CreditEntryType.SALE,
+                referenceId = null,
+                occurredAt = now,
+                paymentMethod = "credit",
+                ledgerType = "SETTLEMENT",
+            ),
+        )
+
+        val summary = projection.summary(period(now))
+
+        assertEquals(1_000L, summary.creditCreatedCents)
+        assertEquals(1_400L, summary.totalReceivableCents)
+        assertEquals(0L, summary.receivedTotalCents)
+    }
+
+    @Test
     fun snapshotRestoreProducesEquivalentSummary() = runBlocking {
         val now = System.currentTimeMillis()
         insertFacts(now)

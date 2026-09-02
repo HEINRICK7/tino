@@ -99,7 +99,7 @@ class G4AgentLoopViewModel @Inject constructor() : ViewModel() {
     }
 
     private class HarnessPlanner(private val scenario: G4Scenario) : PlannerPort {
-        override val id: String = "adk-harness"
+        override val id: String = "deterministic-harness"
         private var calls = 0
 
         override suspend fun plan(request: IntelligenceRequest): IntelligencePlan {

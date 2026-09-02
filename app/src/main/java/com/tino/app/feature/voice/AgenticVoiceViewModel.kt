@@ -111,7 +111,6 @@ data class AgenticVoiceMetrics(
     val fastRouterHit: Boolean = false,
     val commandRouterMs: Long = 0L,
     val commandRouterHit: Boolean = false,
-    val gemmaMs: Long,
     val intentMs: Long,
     val customerResolutionMs: Long? = null,
     val productResolutionMs: Long? = null,
@@ -407,7 +406,7 @@ class AgenticVoiceViewModel @Inject constructor(
     }
 
     /** Semantic action path used by Home Quick Queries; it never synthesizes speech. */
-    fun submitCapability(capability: AgentCapability, label: String) {
+    fun submitCapability(capability: AgentCapability, label: String, subjectId: String? = null) {
         if (sessionJob?.isActive == true) return
         val transcript = label.trim().ifBlank { "Consulta rápida" }
         val requiredCapability = capability.toTinoCapabilityId()
@@ -430,7 +429,7 @@ class AgenticVoiceViewModel @Inject constructor(
             agentSession.beginUnderstanding()
             _state.value = AgenticVoiceState.Understanding(transcript, "Consultando…")
             try {
-                val response = withTimeout(FAST_QUERY_TIMEOUT_MS) { query.askCapability(capability) }
+                val response = withTimeout(FAST_QUERY_TIMEOUT_MS) { query.askCapability(capability, subjectId) }
                 when (response) {
                     is AgentA2uiResponse.Ready -> _state.value = AgenticVoiceState.Result(transcript, response, metrics(response))
                     is AgentA2uiResponse.CustomerBalanceReady -> _state.value = AgenticVoiceState.CustomerBalanceResult(transcript, response, metrics(response))
@@ -950,7 +949,6 @@ class AgenticVoiceViewModel @Inject constructor(
         fastRouterHit = response.fastRouterHit,
         commandRouterMs = response.commandRouterMs,
         commandRouterHit = response.commandRouterHit,
-        gemmaMs = response.intentLatencyMs,
         intentMs = response.intentLatencyMs,
         customerResolutionMs = (response as? AgentA2uiResponse.ActionPreview)
             ?.preview?.diagnostics?.customerResolutionMs
@@ -973,7 +971,8 @@ class AgenticVoiceViewModel @Inject constructor(
     companion object {
         const val VOICE_TIMEOUT_MS = 15_000L
         const val FAST_QUERY_TIMEOUT_MS = 3_000L
-        const val AGENT_QUERY_TIMEOUT_MS = 5_000L
+        /** Keeps the local interpretation path bounded; never waits indefinitely. */
+        const val AGENT_QUERY_TIMEOUT_MS = 45_000L
         const val CONFIRMATION_TIMEOUT_MS = 5_000L
         const val UNDO_TIMEOUT_MS = 5_000L
     }

@@ -7,5 +7,6 @@ object TinoShapes {
     val small = RoundedCornerShape(8.dp)
     val medium = RoundedCornerShape(12.dp)
     val large = RoundedCornerShape(16.dp)
+    val sheet = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     val full = RoundedCornerShape(50)
 }

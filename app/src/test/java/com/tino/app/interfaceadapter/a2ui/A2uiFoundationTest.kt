@@ -4,10 +4,17 @@ import com.tino.app.domain.agent.FinancialSummaryResult
 import com.tino.app.domain.agent.AgentDataSource
 import com.tino.app.domain.agent.AgentResponse
 import com.tino.app.domain.agent.CustomerBalanceResult
+import com.tino.app.domain.agent.CustomerListItem
+import com.tino.app.domain.agent.CustomerListResult
+import com.tino.app.domain.agent.CustomerContactResult
 import com.tino.app.domain.agent.DbFirstReadResult
+import com.tino.app.domain.agent.SupplierListItem
+import com.tino.app.domain.agent.SupplierListResult
 import com.tino.app.domain.agent.ProductListItem
 import com.tino.app.domain.agent.ProductListResult
 import com.tino.app.domain.agent.ReplenishmentResult
+import com.tino.app.domain.agent.ReceivableItem
+import com.tino.app.domain.agent.ReceivablesListResult
 import com.tino.app.domain.agent.AgentCapability
 import com.tino.app.domain.voice.ToolPreview
 import com.tino.app.domain.voice.ToolPreviewPresentation
@@ -58,6 +65,7 @@ class A2uiFoundationTest {
                 answer = "Chico Filó está com R$ 62,50 em aberto.",
                 factsUsed = listOf("customer_balances"),
                 analyticsUsed = listOf("average_payment_delay_days"),
+                knowledgeCatalogVersion = "v1",
                 limitations = listOf("Histórico local do aparelho."),
             ),
         )
@@ -66,6 +74,7 @@ class A2uiFoundationTest {
 
         assertEquals(original, decoded)
         assertTrue(decoded.component is A2uiComponent.InsightCard)
+        assertTrue((decoded.component as A2uiComponent.InsightCard).evidence.any { it.label == "Catálogo" && it.value == "v1" })
         assertTrue(TinoA2UiComponentCatalog.isAllowed(decoded.component.type))
     }
 
@@ -147,6 +156,7 @@ class A2uiFoundationTest {
                 TinoA2UiComponentCatalog.PRODUCT_STOCK,
                 TinoA2UiComponentCatalog.PRODUCT_PRICE,
                 TinoA2UiComponentCatalog.CUSTOMER_LIST,
+                TinoA2UiComponentCatalog.CUSTOMER_CONTACT,
                 TinoA2UiComponentCatalog.RECEIVABLES_LIST,
                 TinoA2UiComponentCatalog.OVERDUE_LIST,
                 TinoA2UiComponentCatalog.INSIGHT_CARD,
@@ -218,7 +228,7 @@ class A2uiFoundationTest {
         assertEquals("R$ 8,50", card.items.single().secondaryText)
         assertEquals("Estoque", card.items.single().context)
         assertEquals("Disponível", card.items.single().supportingText)
-        assertEquals(A2uiVisualStatus.NORMAL, card.items.single().status)
+        assertEquals(A2uiVisualStatus.SUCCESS, card.items.single().status)
         assertEquals("inventory", card.items.single().iconKey)
         assertEquals("LOCAL_ONLY", card.dataSource)
     }
@@ -245,6 +255,121 @@ class A2uiFoundationTest {
         assertEquals("Estoque zerado", card.items.single().supportingText)
         assertEquals(A2uiVisualStatus.WARNING, card.items.single().status)
         assertEquals("inventory", card.items.single().iconKey)
+    }
+
+    @Test
+    fun customersMapToInformationalEntityCardsWithoutDuplicatingPhone() {
+        val message = DbFirstReadA2uiMapper().map(
+            AgentResponse.ReadListReady(
+                capability = AgentCapability.LIST_CUSTOMERS,
+                result = DbFirstReadResult.Customers(
+                    CustomerListResult(
+                        items = listOf(CustomerListItem("c1", "Maria Lina", "86994209350")),
+                    ),
+                ),
+                dataSource = AgentDataSource.LOCAL_ONLY,
+            ),
+        )
+
+        val card = message.component as A2uiComponent.ReadListCard
+        val item = card.items.single()
+        assertEquals(TinoA2UiComponentCatalog.CUSTOMER_LIST, card.type)
+        assertEquals(A2uiVisualStatus.INFO, item.status)
+        assertEquals("86994209350", item.secondaryText)
+        assertEquals(null, item.supportingText)
+        assertEquals("c1", item.actionId)
+    }
+
+    @Test
+    fun suppliersMapToInformationalSupplierCardsWithoutInventingContactData() {
+        val message = DbFirstReadA2uiMapper().map(
+            AgentResponse.ReadListReady(
+                capability = AgentCapability.LIST_SUPPLIERS,
+                result = DbFirstReadResult.Suppliers(
+                    SupplierListResult(
+                        items = listOf(SupplierListItem("s1", "Distribuidora Central", null)),
+                    ),
+                ),
+                dataSource = AgentDataSource.LOCAL_ONLY,
+            ),
+        )
+
+        val card = message.component as A2uiComponent.ReadListCard
+        val item = card.items.single()
+        assertEquals(TinoA2UiComponentCatalog.SUPPLIER_SUMMARY, card.type)
+        assertEquals("Distribuidora Central", item.title)
+        assertEquals("Fornecedor", item.primaryText)
+        assertEquals("Sem telefone", item.supportingText)
+        assertEquals(null, item.secondaryText)
+        assertEquals("s1", item.actionId)
+    }
+
+    @Test
+    fun customerContactMapsPhoneAndMissingPhoneWithoutInventingData() {
+        val withPhone = DbFirstReadA2uiMapper().map(
+            AgentResponse.ReadListReady(
+                capability = AgentCapability.GET_CUSTOMER_CONTACT,
+                result = DbFirstReadResult.CustomerContact(
+                    CustomerContactResult("c1", "Maria Lina", "86994209350"),
+                ),
+                dataSource = AgentDataSource.LOCAL_ONLY,
+            ),
+        ).component as A2uiComponent.ReadListCard
+
+        assertEquals(TinoA2UiComponentCatalog.CUSTOMER_CONTACT, withPhone.type)
+        assertEquals("86994209350", withPhone.items.single().primaryText)
+        assertEquals("Telefone cadastrado", withPhone.items.single().supportingText)
+
+        val withoutPhone = DbFirstReadA2uiMapper().map(
+            AgentResponse.ReadListReady(
+                capability = AgentCapability.GET_CUSTOMER_CONTACT,
+                result = DbFirstReadResult.CustomerContact(
+                    CustomerContactResult("c2", "João", null),
+                ),
+                dataSource = AgentDataSource.LOCAL_ONLY,
+            ),
+        ).component as A2uiComponent.ReadListCard
+
+        assertEquals("Sem telefone", withoutPhone.items.single().primaryText)
+        assertEquals("Nenhum telefone cadastrado", withoutPhone.items.single().supportingText)
+    }
+
+    @Test
+    fun customerContactRoundTripsThroughTheVersionedCodec() {
+        val original = DbFirstReadA2uiMapper().map(
+            AgentResponse.ReadListReady(
+                capability = AgentCapability.GET_CUSTOMER_CONTACT,
+                result = DbFirstReadResult.CustomerContact(
+                    CustomerContactResult("c1", "Maria Lina", "86994209350"),
+                ),
+                dataSource = AgentDataSource.LOCAL_ONLY,
+            ),
+        )
+
+        assertEquals(original, TinoA2UiJsonCodec.decode(TinoA2UiJsonCodec.encode(original)))
+    }
+
+    @Test
+    fun receivablesMapToCreditEntityCards() {
+        val message = DbFirstReadA2uiMapper().map(
+            AgentResponse.ReadListReady(
+                capability = AgentCapability.LIST_RECEIVABLES,
+                result = DbFirstReadResult.Receivables(
+                    ReceivablesListResult(
+                        items = listOf(ReceivableItem("c1", "Maria Lina", 2_985)),
+                    ),
+                ),
+                dataSource = AgentDataSource.LOCAL_ONLY,
+            ),
+        )
+
+        val card = message.component as A2uiComponent.ReadListCard
+        val item = card.items.single()
+        assertEquals(TinoA2UiComponentCatalog.RECEIVABLES_LIST, card.type)
+        assertEquals(A2uiVisualStatus.CREDIT, item.status)
+        assertEquals("credit", item.iconKey)
+        assertEquals("R$ 29,85", item.primaryText)
+        assertEquals("c1", item.actionId)
     }
 
     @Test

@@ -144,6 +144,7 @@ enum class A2uiVisualStatus {
     WARNING,
     ERROR,
     INFO,
+    CREDIT,
 }
 
 data class A2uiListItem(
@@ -178,6 +179,7 @@ object TinoA2UiComponentCatalog {
     const val PRODUCT_STOCK = "product_stock"
     const val PRODUCT_PRICE = "product_price"
     const val CUSTOMER_LIST = "customer_list"
+    const val CUSTOMER_CONTACT = "customer_contact"
     const val RECEIVABLES_LIST = "receivables_list"
     const val OVERDUE_LIST = "overdue_list"
     const val INSIGHT_CARD = "insight_card"
@@ -203,6 +205,7 @@ object TinoA2UiComponentCatalog {
         PRODUCT_STOCK,
         PRODUCT_PRICE,
         CUSTOMER_LIST,
+        CUSTOMER_CONTACT,
         RECEIVABLES_LIST,
         OVERDUE_LIST,
         INSIGHT_CARD,

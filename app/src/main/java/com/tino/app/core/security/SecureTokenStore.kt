@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import org.json.JSONObject
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
@@ -17,19 +18,60 @@ import javax.inject.Singleton
 class SecureTokenStore @Inject constructor(
     @ApplicationContext context: Context,
 ) {
+    data class AuthSession(
+        val accessToken: String,
+        val refreshToken: String?,
+        val expiresAtEpochMs: Long?,
+    )
+
     private val preferences = context.getSharedPreferences("tino_secure_session", Context.MODE_PRIVATE)
     private val keyAlias = "tino-auth-token"
 
     fun save(token: String) {
+        saveEncrypted(token)
+    }
+
+    fun saveSession(
+        accessToken: String,
+        refreshToken: String?,
+        expiresAtEpochMs: Long?,
+    ) {
+        require(accessToken.isNotBlank()) { "O access token não pode ser vazio." }
+        val payload = JSONObject().apply {
+            put("access_token", accessToken)
+            if (refreshToken == null) put("refresh_token", JSONObject.NULL) else put("refresh_token", refreshToken)
+            if (expiresAtEpochMs == null) put("expires_at", JSONObject.NULL) else put("expires_at", expiresAtEpochMs)
+        }.toString()
+        saveEncrypted(payload)
+    }
+
+    fun readSession(): AuthSession? {
+        val value = readRaw() ?: return null
+        return runCatching {
+            val json = JSONObject(value)
+            AuthSession(
+                accessToken = json.getString("access_token"),
+                refreshToken = json.optString("refresh_token").takeIf { it.isNotBlank() && it != "null" },
+                expiresAtEpochMs = if (json.isNull("expires_at")) null else json.getLong("expires_at"),
+            )
+        }.getOrElse {
+            // Compatibility with sessions written before refresh-token support.
+            AuthSession(value, null, null)
+        }
+    }
+
+    fun read(): String? = readSession()?.accessToken
+
+    private fun saveEncrypted(value: String) {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key())
-        val encrypted = cipher.doFinal(token.toByteArray(StandardCharsets.UTF_8))
+        val encrypted = cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8))
         val encoded = Base64.encodeToString(encrypted, Base64.NO_WRAP)
         val iv = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
         preferences.edit().putString("token", encoded).putString("iv", iv).apply()
     }
 
-    fun read(): String? {
+    private fun readRaw(): String? {
         val encoded = preferences.getString("token", null) ?: return null
         val iv = preferences.getString("iv", null) ?: return null
         val cipher = Cipher.getInstance(TRANSFORMATION)

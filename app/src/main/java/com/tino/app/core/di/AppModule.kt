@@ -4,11 +4,8 @@ import com.tino.app.BuildConfig
 import android.content.Context
 import androidx.room.Room
 import com.tino.agent.contracts.CreditPreparationFactsPort
-import com.tino.agent.contracts.CreditPlanInferencePort
 import com.tino.app.core.agent.AndroidCreditPreparationFactsAdapter
-import com.tino.app.core.agent.AndroidGemmaCreditPlanInferenceAdapter
 import com.tino.app.core.intelligence.RoomCommerceIntelligenceFacts
-import com.tino.app.core.intelligence.GoogleAdkGemmaPlanProposal
 import com.tino.app.core.database.MIGRATION_1_2
 import com.tino.app.core.database.MIGRATION_2_3
 import com.tino.app.core.database.MIGRATION_3_4
@@ -28,6 +25,15 @@ import com.tino.app.core.database.MIGRATION_16_17
 import com.tino.app.core.database.MIGRATION_17_18
 import com.tino.app.core.database.MIGRATION_18_19
 import com.tino.app.core.database.MIGRATION_19_20
+import com.tino.app.core.database.MIGRATION_20_21
+import com.tino.app.core.database.MIGRATION_21_22
+import com.tino.app.core.database.MIGRATION_22_23
+import com.tino.app.core.database.MIGRATION_23_24
+import com.tino.app.core.database.MIGRATION_24_25
+import com.tino.app.core.database.MIGRATION_25_26
+import com.tino.app.core.database.MIGRATION_26_27
+import com.tino.app.core.database.MIGRATION_27_28
+import com.tino.app.core.database.MIGRATION_28_29
 import com.tino.app.core.database.CustomerDao
 import com.tino.app.core.database.CreditDao
 import com.tino.app.core.database.DomainEventDao
@@ -42,9 +48,13 @@ import com.tino.app.core.database.SupplierDao
 import com.tino.app.core.database.SyncCursorDao
 import com.tino.app.core.database.StoreProfileDao
 import com.tino.app.core.database.TinoDatabase
+import com.tino.app.core.database.CatalogSyncStateDao
 import com.tino.app.core.database.FiscalImportDao
 import com.tino.app.core.database.SupplierProductMappingDao
 import com.tino.app.core.database.ProductPurchaseHistoryDao
+import com.tino.app.core.database.GoodsReceiptOperationDao
+import com.tino.app.core.database.RemoteGoodsReceiptDao
+import com.tino.app.core.database.RemoteProductMappingDao
 import com.tino.app.core.database.AgentActivityDao
 import com.tino.app.core.database.RoomAgentActivityRepository
 import com.tino.app.core.database.IntelligenceTelemetryDao
@@ -57,15 +67,43 @@ import com.tino.app.core.database.RoomInteractionStateStore
 import com.tino.app.core.database.RoomBusinessMemoryRepository
 import com.tino.app.core.database.RecommendationDao
 import com.tino.app.core.database.RoomRecommendationRepository
+import com.tino.app.core.database.AttentionDao
+import com.tino.app.core.database.RoomAttentionRepository
+import com.tino.app.core.database.IntelligenceEvidenceDao
+import com.tino.app.core.database.RoomApprovedKnowledgeCatalog
+import com.tino.app.core.database.RoomTinoEvidenceRepository
 import com.tino.app.domain.agent.AgentActivityRepository
 import com.tino.app.domain.intelligence.IntelligenceTelemetryPort
 import com.tino.app.core.sync.SyncGateway
 import com.tino.app.core.sync.SyncScheduler
 import com.tino.app.core.sync.RestSyncGateway
 import com.tino.app.core.sync.UnavailableSyncGateway
+import com.tino.app.core.network.GoodsReceiptApi
+import com.tino.app.core.network.RestGoodsReceiptApi
+import com.tino.app.core.network.UnavailableGoodsReceiptApi
+import com.tino.app.core.network.UrlConnectionBackendTransport
+import com.tino.app.core.network.NfcePurchaseDocumentApi
+import com.tino.app.core.network.RestNfcePurchaseDocumentApi
+import com.tino.app.core.network.UnavailableNfcePurchaseDocumentApi
+import com.tino.app.core.network.RestCatalogApi
+import com.tino.app.core.network.UnavailableCatalogApi
+import com.tino.app.core.network.RestBootstrapApi
+import com.tino.app.core.network.UnavailableBootstrapApi
+import com.tino.app.core.network.RestBusinessDataSourceApi
+import com.tino.app.core.network.UnavailableBusinessDataSourceApi
+import com.tino.app.core.network.RestOtpAuthApi
+import com.tino.app.core.network.UnavailableOtpAuthApi
+import com.tino.app.core.auth.OidcAuthCoordinator
+import com.tino.app.domain.onboarding.BootstrapApi
+import com.tino.app.domain.onboarding.BusinessDataSourceApi
+import com.tino.app.domain.onboarding.OtpAuthApi as OtpAuthPort
+import com.tino.app.domain.catalog.CatalogApi
+import com.tino.app.domain.catalog.CatalogProductStore
+import com.tino.app.domain.catalog.CatalogSyncStateStore
+import com.tino.app.core.catalog.RoomCatalogProductStore
+import com.tino.app.core.catalog.RoomCatalogSyncStateStore
 import com.tino.app.core.sync.WorkManagerSyncScheduler
 import com.tino.app.core.security.SecureTokenStore
-import com.tino.app.domain.voice.GemmaOrchestrator
 import com.tino.app.domain.agent.AgentIntentInterpreter
 import com.tino.app.domain.agent.AgenticTextQueryCoordinator
 import com.tino.app.domain.agent.AgenticTextQueryPort
@@ -91,18 +129,12 @@ import com.tino.app.domain.voice.MutationConfirmationService
 import com.tino.app.domain.voice.ToolExecutor
 import com.tino.app.domain.orders.CatalogLookup
 import com.tino.app.domain.orders.CommerceCatalogLookup
-import com.tino.app.core.speech.GemmaLiveTranscriber
-import com.tino.app.core.speech.GemmaTranscriberRuntime
+import com.tino.app.core.speech.LiveTranscriber
+import com.tino.app.core.speech.SpeechTranscriberRuntime
 import com.tino.app.core.speech.LiveTranscriberPort
-import com.tino.app.core.speech.UnavailableGemmaTranscriberRuntime
 import com.tino.app.core.speech.AndroidSpeechRecognizerRuntime
-import com.tino.app.core.speech.GemmaStructuredExtractor
-import com.tino.app.core.speech.GemmaVoiceInputAdapter
-import com.tino.app.core.speech.MediaPipeGemmaStructuredExtractor
-import com.tino.app.core.speech.MediaPipeGemmaOrchestrator
-import com.tino.app.core.speech.MediaPipeGemmaAgentIntentAdapter
-import com.tino.app.core.speech.GemmaTextInference
-import com.tino.app.core.speech.MediaPipeGemmaTextInference
+import com.tino.app.core.speech.ManualVoiceInputAdapter
+import com.tino.app.domain.agent.DeterministicAgentIntentInterpreter
 import com.tino.app.domain.voice.VoiceInputPort
 import com.tino.app.domain.intelligence.BusinessAnalyticsPort
 import com.tino.app.domain.intelligence.DeterministicBusinessAnalytics
@@ -110,25 +142,27 @@ import com.tino.app.domain.intelligence.DeterministicIntelligencePlanExecutor
 import com.tino.app.domain.intelligence.DeterministicIntelligencePlanValidator
 import com.tino.app.domain.intelligence.DeterministicIntelligenceQueryPlanner
 import com.tino.app.domain.intelligence.DeterministicIntelligenceRuntime
-import com.tino.app.domain.intelligence.GoogleAdkOrchestratorPort
-import com.tino.app.domain.intelligence.GoogleAdkRuntimeAdapter
-import com.tino.app.domain.intelligence.UnavailableGoogleAdkOrchestrator
 import com.tino.app.domain.intelligence.IntelligenceFactsPort
 import com.tino.app.domain.intelligence.IntelligenceRuntimePort
 import com.tino.app.domain.intelligence.InMemoryLongTermMemory
 import com.tino.app.domain.intelligence.KnowledgeQueryPort
 import com.tino.app.domain.intelligence.MemoryPort
-import com.tino.app.domain.intelligence.UnavailableKnowledgeAdapter
+import com.tino.app.domain.intelligence.LocalApprovedKnowledgeAdapter
+import com.tino.app.domain.intelligence.ApprovedKnowledgeCatalogPort
+import com.tino.app.domain.intelligence.KnowledgeRetrievalMetricsPort
+import com.tino.app.domain.intelligence.InMemoryKnowledgeRetrievalMetrics
 import com.tino.app.domain.intelligence.IntelligencePlanExecutor
 import com.tino.app.domain.intelligence.IntelligencePlanValidator
 import com.tino.app.domain.intelligence.LocalHeuristicRecommendationEngine
 import com.tino.app.domain.intelligence.RecommendationEngine
 import com.tino.app.domain.intelligence.RecommendationRepository
+import com.tino.app.domain.intelligence.AttentionRepository
+import com.tino.app.domain.intelligence.TinoEvidenceRepository
+import com.tino.app.core.intelligence.AttentionNotificationScheduler
+import com.tino.app.core.intelligence.WorkManagerAttentionNotificationScheduler
 import com.tino.app.domain.intelligence.PlannerPort
-import com.tino.app.domain.intelligence.AdkPlanProposalPort
-import com.tino.app.domain.intelligence.AdkQueryPlanner
 import com.tino.app.domain.intelligence.agent.AgentRuntimePort
-import com.tino.app.domain.intelligence.agent.AdkAgentRuntime
+import com.tino.app.domain.intelligence.agent.DefaultAgentRuntime
 import com.tino.app.domain.intelligence.agent.AgentDecisionPolicy
 import com.tino.app.domain.intelligence.agent.DeterministicAgentDecisionPolicy
 import com.tino.app.domain.agent.InteractionStateStore
@@ -173,10 +207,14 @@ object AppModule {
     fun provideDatabase(@ApplicationContext context: Context): TinoDatabase =
         Room.databaseBuilder(context, TinoDatabase::class.java, "tino.db")
             .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
-            .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20)
+            .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29)
             .build()
 
     @Provides fun provideProductDao(database: TinoDatabase): ProductDao = database.productDao()
+    @Provides fun provideCatalogSyncStateDao(database: TinoDatabase): CatalogSyncStateDao = database.catalogSyncStateDao()
+    @Provides fun provideGoodsReceiptOperationDao(database: TinoDatabase): GoodsReceiptOperationDao = database.goodsReceiptOperationDao()
+    @Provides fun provideRemoteGoodsReceiptDao(database: TinoDatabase): RemoteGoodsReceiptDao = database.remoteGoodsReceiptDao()
+    @Provides fun provideRemoteProductMappingDao(database: TinoDatabase): RemoteProductMappingDao = database.remoteProductMappingDao()
     @Provides fun provideSaleDao(database: TinoDatabase): SaleDao = database.saleDao()
     @Provides fun provideDirectReceiptDao(database: TinoDatabase): DirectReceiptDao = database.directReceiptDao()
     @Provides fun provideFinancialProjectionDao(database: TinoDatabase): FinancialProjectionDao = database.financialProjectionDao()
@@ -198,6 +236,8 @@ object AppModule {
     @Provides fun provideMutationOperationDao(database: TinoDatabase): MutationOperationDao = database.mutationOperationDao()
     @Provides fun provideBusinessMemoryDao(database: TinoDatabase): BusinessMemoryDao = database.businessMemoryDao()
     @Provides fun provideRecommendationDao(database: TinoDatabase): RecommendationDao = database.recommendationDao()
+    @Provides fun provideAttentionDao(database: TinoDatabase): AttentionDao = database.attentionDao()
+    @Provides fun provideIntelligenceEvidenceDao(database: TinoDatabase): IntelligenceEvidenceDao = database.intelligenceEvidenceDao()
     @Provides
     @Singleton
     fun provideAgentActivityRepository(implementation: RoomAgentActivityRepository): AgentActivityRepository = implementation
@@ -246,16 +286,79 @@ object AppModule {
         ?: UnavailableSyncGateway()
 
     @Provides
-    fun provideSyncScheduler(implementation: WorkManagerSyncScheduler): SyncScheduler = implementation
-
-    @Provides
-    fun provideGemmaOrchestrator(implementation: MediaPipeGemmaOrchestrator): GemmaOrchestrator = implementation
+    @Singleton
+    fun provideGoodsReceiptApi(
+        tokenStore: SecureTokenStore,
+        auth: OidcAuthCoordinator,
+    ): GoodsReceiptApi = BuildConfig.TINO_BACKEND_BASE_URL
+        .takeIf { it.isNotBlank() }
+        ?.let { RestGoodsReceiptApi(it, UrlConnectionBackendTransport(it, tokenStore, tokenRefresher = auth)) }
+        ?: UnavailableGoodsReceiptApi()
 
     @Provides
     @Singleton
-    fun provideAgentIntentInterpreter(
-        implementation: MediaPipeGemmaAgentIntentAdapter,
-    ): AgentIntentInterpreter = implementation
+    fun provideNfcePurchaseDocumentApi(
+        tokenStore: SecureTokenStore,
+        auth: OidcAuthCoordinator,
+    ): NfcePurchaseDocumentApi = BuildConfig.TINO_BACKEND_BASE_URL
+        .takeIf { it.isNotBlank() }
+        ?.let { RestNfcePurchaseDocumentApi(UrlConnectionBackendTransport(it, tokenStore, tokenRefresher = auth)) }
+        ?: UnavailableNfcePurchaseDocumentApi()
+
+    @Provides
+    @Singleton
+    fun provideCatalogApi(
+        tokenStore: SecureTokenStore,
+        auth: OidcAuthCoordinator,
+    ): CatalogApi = BuildConfig.TINO_BACKEND_BASE_URL
+        .takeIf { it.isNotBlank() }
+        ?.let { RestCatalogApi(it, UrlConnectionBackendTransport(it, tokenStore, tokenRefresher = auth)) }
+        ?: UnavailableCatalogApi()
+
+    @Provides
+    @Singleton
+    fun provideBootstrapApi(
+        tokenStore: SecureTokenStore,
+        auth: OidcAuthCoordinator,
+    ): BootstrapApi = BuildConfig.TINO_BACKEND_BASE_URL
+        .takeIf { it.isNotBlank() }
+        ?.let { RestBootstrapApi(it, UrlConnectionBackendTransport(it, tokenStore, tokenRefresher = auth)) }
+        ?: UnavailableBootstrapApi()
+
+    @Provides
+    @Singleton
+    fun provideBusinessDataSourceApi(
+        tokenStore: SecureTokenStore,
+        auth: OidcAuthCoordinator,
+    ): BusinessDataSourceApi = BuildConfig.TINO_BACKEND_BASE_URL
+        .takeIf { it.isNotBlank() }
+        ?.let { RestBusinessDataSourceApi(it, UrlConnectionBackendTransport(it, tokenStore, tokenRefresher = auth)) }
+        ?: UnavailableBusinessDataSourceApi()
+
+    @Provides
+    @Singleton
+    fun provideOtpAuthApi(tokenStore: SecureTokenStore): OtpAuthPort = BuildConfig.TINO_BACKEND_BASE_URL
+        .takeIf { it.isNotBlank() }
+        ?.let { RestOtpAuthApi(it, UrlConnectionBackendTransport(it, tokenStore)) }
+        ?: UnavailableOtpAuthApi()
+
+    @Provides
+    fun provideCatalogProductStore(implementation: RoomCatalogProductStore): CatalogProductStore = implementation
+
+    @Provides
+    fun provideCatalogSyncStateStore(implementation: RoomCatalogSyncStateStore): CatalogSyncStateStore = implementation
+
+    @Provides
+    fun provideSyncScheduler(implementation: WorkManagerSyncScheduler): SyncScheduler = implementation
+
+    @Provides
+    fun provideAttentionNotificationScheduler(
+        implementation: WorkManagerAttentionNotificationScheduler,
+    ): AttentionNotificationScheduler = implementation
+
+    @Provides
+    @Singleton
+    fun provideAgentIntentInterpreter(): AgentIntentInterpreter = DeterministicAgentIntentInterpreter()
 
     @Provides
     @Singleton
@@ -309,11 +412,32 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideAttentionRepository(implementation: RoomAttentionRepository): AttentionRepository = implementation
+
+    @Provides
+    @Singleton
+    fun provideTinoEvidenceRepository(implementation: RoomTinoEvidenceRepository): TinoEvidenceRepository = implementation
+
+    @Provides
+    @Singleton
     fun provideIntelligenceMemory(implementation: InMemoryLongTermMemory): MemoryPort = implementation
 
     @Provides
     @Singleton
-    fun provideKnowledgeQueryPort(implementation: UnavailableKnowledgeAdapter): KnowledgeQueryPort = implementation
+    fun provideApprovedKnowledgeCatalog(
+        database: TinoDatabase,
+    ): ApprovedKnowledgeCatalogPort = RoomApprovedKnowledgeCatalog(
+        dao = database.approvedKnowledgeCatalogDao(),
+        database = database,
+    )
+
+    @Provides
+    @Singleton
+    fun provideKnowledgeRetrievalMetrics(): KnowledgeRetrievalMetricsPort = InMemoryKnowledgeRetrievalMetrics()
+
+    @Provides
+    @Singleton
+    fun provideKnowledgeQueryPort(implementation: LocalApprovedKnowledgeAdapter): KnowledgeQueryPort = implementation
 
     @Provides
     @Singleton
@@ -322,19 +446,9 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideAdkPlanProposal(
-        implementation: GoogleAdkGemmaPlanProposal,
-    ): AdkPlanProposalPort = implementation
-
-    @Provides
-    @Singleton
     fun provideIntelligencePlanner(
-        proposal: AdkPlanProposalPort,
         deterministic: DeterministicIntelligenceQueryPlanner,
-    ): PlannerPort = AdkQueryPlanner(
-        proposalPort = proposal,
-        deterministicFallback = deterministic,
-    )
+    ): PlannerPort = deterministic
 
     @Provides
     @Singleton
@@ -360,15 +474,11 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideGoogleAdkOrchestrator(implementation: UnavailableGoogleAdkOrchestrator): GoogleAdkOrchestratorPort = implementation
+    fun provideIntelligenceRuntime(implementation: DeterministicIntelligenceRuntime): IntelligenceRuntimePort = implementation
 
     @Provides
     @Singleton
-    fun provideIntelligenceRuntime(implementation: GoogleAdkRuntimeAdapter): IntelligenceRuntimePort = implementation
-
-    @Provides
-    @Singleton
-    fun provideAgentRuntime(implementation: AdkAgentRuntime): AgentRuntimePort = implementation
+    fun provideAgentRuntime(implementation: DefaultAgentRuntime): AgentRuntimePort = implementation
 
     @Provides
     @Singleton
@@ -383,35 +493,17 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideCreditPlanInferencePort(
-        implementation: AndroidGemmaCreditPlanInferenceAdapter,
-    ): CreditPlanInferencePort = implementation
-
-    @Provides
-    @Singleton
-    fun provideGemmaTextInference(
-        implementation: MediaPipeGemmaTextInference,
-    ): GemmaTextInference = implementation
-
-    @Provides
-    @Singleton
-    fun provideGemmaTranscriberRuntime(
+    fun provideSpeechTranscriberRuntime(
         implementation: AndroidSpeechRecognizerRuntime,
-    ): GemmaTranscriberRuntime = implementation
+    ): SpeechTranscriberRuntime = implementation
 
     @Provides
     @Singleton
-    fun provideLiveTranscriber(implementation: GemmaLiveTranscriber): LiveTranscriberPort = implementation
+    fun provideLiveTranscriber(implementation: LiveTranscriber): LiveTranscriberPort = implementation
 
     @Provides
     @Singleton
-    fun provideGemmaStructuredExtractor(
-        implementation: MediaPipeGemmaStructuredExtractor,
-    ): GemmaStructuredExtractor = implementation
-
-    @Provides
-    @Singleton
-    fun provideVoiceInputPort(implementation: GemmaVoiceInputAdapter): VoiceInputPort = implementation
+    fun provideVoiceInputPort(implementation: ManualVoiceInputAdapter): VoiceInputPort = implementation
 
     @Provides
     fun provideMutationSafety(implementation: MutationSafetyCoordinator): MutationSafetyPort = implementation

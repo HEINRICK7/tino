@@ -24,6 +24,10 @@ class A2uiIntentDrivenTest {
 
         assertEquals(TinoA2UiComponentCatalog.PAYMENT_PREVIEW, payment)
         assertEquals(TinoA2UiComponentCatalog.ERROR_RECOVERY, correction)
+        assertEquals(
+            TinoA2UiComponentCatalog.ACTION_CONFIRMATION,
+            A2uiSemanticComponentRegistry.forCapability(TinoCapabilityId.CREATE_CUSTOMER),
+        )
         assertTrue(A2uiPresentationPolicy.isSafeComponent(payment))
         assertFalse(A2uiPresentationPolicy.isSafeComponent("execute_command"))
         assertEquals(TinoPresentationMode.BOTTOM_SHEET, A2uiPresentationPolicy.forIntent(TinoIntent.RECEIVE_CREDIT_PAYMENT))

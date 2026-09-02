@@ -1,215 +1,158 @@
 package com.tino.app.presentation.splash
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Image
+import android.graphics.Color as AndroidColor
+import android.media.MediaPlayer
+import android.net.Uri
+import android.content.Context
+import android.view.Gravity
+import android.view.View.MeasureSpec
+import android.widget.FrameLayout
+import android.widget.VideoView
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import com.tino.app.R
-import com.tino.app.ui.theme.TinoGreenDark
 import com.tino.app.ui.theme.TinoPaper
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.ceil
 import kotlinx.coroutines.delay
 
-private val SplashMarkSize = 116.dp
+private val SplashBackground = TinoPaper
+private const val SplashFallbackTimeoutMillis = 12_000L
+private const val SplashVideoWidth = 720f
+private const val SplashVideoHeight = 1280f
+private const val SplashContentScale = 0.72f
 
+private class CropVideoView(context: Context) : VideoView(context) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        setMeasuredDimension(
+            MeasureSpec.getSize(widthMeasureSpec),
+            MeasureSpec.getSize(heightMeasureSpec),
+        )
+    }
+}
+
+/** Keeps the top entrance flush with the screen while preserving the artwork's intended scale. */
+private class SplashVideoLayout(context: Context) : FrameLayout(context) {
+    val player = CropVideoView(context)
+
+    init {
+        setBackgroundColor(SplashBackground.toArgb())
+        clipChildren = true
+        addView(
+            player,
+            LayoutParams(
+                LayoutParams.MATCH_PARENT,
+                LayoutParams.MATCH_PARENT,
+                Gravity.TOP or Gravity.CENTER_HORIZONTAL,
+            ),
+        )
+    }
+
+    override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
+        super.onSizeChanged(width, height, oldWidth, oldHeight)
+        if (width <= 0 || height <= 0) return
+
+        val scale = (width / SplashVideoWidth) * SplashContentScale
+        player.layoutParams = LayoutParams(
+            ceil(SplashVideoWidth * scale).toInt(),
+            ceil(SplashVideoHeight * scale).toInt(),
+            Gravity.TOP or Gravity.CENTER_HORIZONTAL,
+        )
+    }
+}
+
+/** Plays the branded splash once and releases the platform player with the screen. */
 @Composable
 fun TinoSplashScreen(
+    onFirstFrame: () -> Unit = {},
     onFinished: () -> Unit,
 ) {
-    var started by remember { mutableStateOf(false) }
-    var wordmarkVisible by remember { mutableStateOf(false) }
-    var exiting by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val currentOnFirstFrame by rememberUpdatedState(onFirstFrame)
+    val currentOnFinished by rememberUpdatedState(onFinished)
+    val firstFrameSent = remember { AtomicBoolean(false) }
+    val completionSent = remember { AtomicBoolean(false) }
+    var videoView by remember { mutableStateOf<VideoView?>(null) }
 
-    val markScale by animateFloatAsState(
-        targetValue = if (started) 1f else 0.65f,
-        animationSpec = spring(
-            dampingRatio = 0.72f,
-            stiffness = 280f,
-        ),
-        label = "tino-splash-mark-scale",
-    )
-    val markAlpha by animateFloatAsState(
-        targetValue = if (started) 1f else 0f,
-        animationSpec = tween(300),
-        label = "tino-splash-mark-alpha",
-    )
-    val topOffset by animateDpAsState(
-        targetValue = if (started) 0.dp else (-18).dp,
-        animationSpec = spring(
-            dampingRatio = 0.72f,
-            stiffness = 280f,
-        ),
-        label = "tino-splash-top-offset",
-    )
-    val bottomOffset by animateDpAsState(
-        targetValue = if (started) 0.dp else 18.dp,
-        animationSpec = spring(
-            dampingRatio = 0.72f,
-            stiffness = 280f,
-        ),
-        label = "tino-splash-bottom-offset",
-    )
-    val topRotation by animateFloatAsState(
-        targetValue = if (started) 0f else -5f,
-        animationSpec = spring(
-            dampingRatio = 0.72f,
-            stiffness = 280f,
-        ),
-        label = "tino-splash-top-rotation",
-    )
-    val bottomRotation by animateFloatAsState(
-        targetValue = if (started) 0f else 5f,
-        animationSpec = spring(
-            dampingRatio = 0.72f,
-            stiffness = 280f,
-        ),
-        label = "tino-splash-bottom-rotation",
-    )
-    val exitAlpha by animateFloatAsState(
-        targetValue = if (exiting) 0f else 1f,
-        animationSpec = tween(170, easing = FastOutSlowInEasing),
-        label = "tino-splash-exit-alpha",
-    )
-    val exitScale by animateFloatAsState(
-        targetValue = if (exiting) 1.04f else 1f,
-        animationSpec = tween(170, easing = FastOutSlowInEasing),
-        label = "tino-splash-exit-scale",
-    )
+    val sendFirstFrameOnce = {
+        if (firstFrameSent.compareAndSet(false, true)) {
+            currentOnFirstFrame()
+        }
+    }
+    val finishOnce = {
+        if (completionSent.compareAndSet(false, true)) {
+            currentOnFinished()
+        }
+    }
 
     LaunchedEffect(Unit) {
-        started = true
-        delay(280)
-        wordmarkVisible = true
-        delay(540)
-        exiting = true
-        delay(180)
-        onFinished()
+        delay(SplashFallbackTimeoutMillis)
+        sendFirstFrameOnce()
+        finishOnce()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            videoView?.setOnPreparedListener(null)
+            videoView?.setOnCompletionListener(null)
+            videoView?.setOnErrorListener(null)
+            videoView?.setOnInfoListener(null)
+            videoView?.stopPlayback()
+        }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(TinoPaper)
-            .graphicsLayer {
-                alpha = exitAlpha
-                scaleX = exitScale
-                scaleY = exitScale
-            },
-        contentAlignment = Alignment.Center,
+            .background(SplashBackground),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            SplitTinoMark(
-                markScale = markScale,
-                markAlpha = markAlpha,
-                topOffset = topOffset,
-                bottomOffset = bottomOffset,
-                topRotation = topRotation,
-                bottomRotation = bottomRotation,
-            )
-            AnimatedVisibility(
-                visible = wordmarkVisible,
-                enter = fadeIn(tween(300)) + expandHorizontally(
-                    animationSpec = tween(350),
-                    expandFrom = Alignment.Start,
-                ),
-            ) {
-                Text(
-                    text = "TINO",
-                    color = TinoGreenDark,
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontSize = 38.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SplitTinoMark(
-    markScale: Float,
-    markAlpha: Float,
-    topOffset: androidx.compose.ui.unit.Dp,
-    bottomOffset: androidx.compose.ui.unit.Dp,
-    topRotation: Float,
-    bottomRotation: Float,
-) {
-    Box(
-        modifier = Modifier
-            .size(SplashMarkSize)
-            .graphicsLayer {
-                scaleX = markScale
-                scaleY = markScale
-                alpha = markAlpha
+        AndroidView(
+            factory = { viewContext ->
+                SplashVideoLayout(viewContext).apply {
+                    player.setBackgroundColor(SplashBackground.toArgb())
+                    player.setOnPreparedListener { mediaPlayer ->
+                        mediaPlayer.isLooping = false
+                        mediaPlayer.setVolume(0f, 0f)
+                        player.start()
+                    }
+                    player.setOnInfoListener { _, what, _ ->
+                        if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
+                            player.setBackgroundColor(AndroidColor.TRANSPARENT)
+                            sendFirstFrameOnce()
+                        }
+                        false
+                    }
+                    player.setOnCompletionListener {
+                        sendFirstFrameOnce()
+                        finishOnce()
+                    }
+                    player.setOnErrorListener { _, _, _ ->
+                        sendFirstFrameOnce()
+                        finishOnce()
+                        true
+                    }
+                    player.setVideoURI(
+                        Uri.parse(
+                            "android.resource://${context.packageName}/${R.raw.tino_splash}",
+                        ),
+                    )
+                    videoView = player
+                }
             },
-    ) {
-        val markPainter = painterResource(R.drawable.tino_mark)
-        Image(
-            painter = markPainter,
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .fillMaxSize()
-                .drawWithContent {
-                    clipRect(bottom = size.height * 0.51f) {
-                        this@drawWithContent.drawContent()
-                    }
-                }
-                .graphicsLayer {
-                    translationY = topOffset.toPx()
-                    rotationZ = topRotation
-                },
-        )
-        Image(
-            painter = markPainter,
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .fillMaxSize()
-                .drawWithContent {
-                    clipRect(top = size.height * 0.51f) {
-                        this@drawWithContent.drawContent()
-                    }
-                }
-                .graphicsLayer {
-                    translationY = bottomOffset.toPx()
-                    rotationZ = bottomRotation
-                },
+            modifier = Modifier.fillMaxSize(),
         )
     }
 }

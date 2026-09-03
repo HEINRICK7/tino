@@ -51,6 +51,46 @@ class OtpAuthApiContractTest {
     }
 
     @Test
+    fun pollsChallengeStatusWithoutSendingThePhoneOrCode() = runBlocking {
+        var captured: BackendHttpRequest? = null
+        val api = RestOtpAuthApi("https://api.tino.test", BackendHttpTransport { request ->
+            captured = request
+            BackendHttpResponse(
+                200,
+                """{"challenge_id":"challenge-1","status":"VERIFIED","expires_in_seconds":120,"verification_available":true}""",
+            )
+        })
+
+        val status = api.getChallengeStatus("challenge-1")
+
+        assertEquals("GET", captured?.method)
+        assertEquals("/api/v1/auth/otp/challenges/challenge-1", captured?.path)
+        assertEquals(null, captured?.body)
+        assertEquals("VERIFIED", status.status)
+        assertEquals(120L, status.expiresInSeconds)
+        assertTrue(status.verificationAvailable)
+    }
+
+    @Test
+    fun claimsTicketAfterBackendConfirmsWhatsApp() = runBlocking {
+        var captured: BackendHttpRequest? = null
+        val api = RestOtpAuthApi("https://api.tino.test", BackendHttpTransport { request ->
+            captured = request
+            BackendHttpResponse(
+                200,
+                """{"challenge_id":"challenge-1","verification_status":"VERIFIED","verification_ticket":"ticket-2","ticket_expires_in_seconds":60}""",
+            )
+        })
+
+        val verification = api.claimVerification("challenge-1")
+
+        assertEquals("POST", captured?.method)
+        assertEquals("/api/v1/auth/otp/challenges/challenge-1/claim", captured?.path)
+        assertEquals(null, captured?.body)
+        assertEquals("ticket-2", verification.verificationTicket)
+    }
+
+    @Test
     fun rejectsCodesThatCouldNotBeSentToTheBackend() {
         val api = RestOtpAuthApi("https://api.tino.test", BackendHttpTransport {
             error("transport must not be called")

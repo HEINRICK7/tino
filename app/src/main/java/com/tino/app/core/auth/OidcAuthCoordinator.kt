@@ -15,9 +15,15 @@ import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.selects.select
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationRequest
 import net.openid.appauth.AuthorizationResponse
@@ -57,16 +63,68 @@ class OidcAuthCoordinator @Inject constructor(
 
         var challenge = otpAuthApi.requestChallenge(phone)
         while (true) {
-            when (val attempt = otpCodeProvider(challenge)) {
+            when (val attempt = awaitOtpAttempt(challenge, otpCodeProvider)) {
                 OtpCodeAttempt.Resend -> challenge = otpAuthApi.requestChallenge(phone)
                 is OtpCodeAttempt.Submit -> {
                     val verification = otpAuthApi.verifyCode(challenge.challengeId, attempt.code)
                     check(verification.verificationStatus == "VERIFIED") { "O TINO não confirmou o código." }
                     return@withLock authorize(activity, verification.verificationTicket)
                 }
+                OtpCodeAttempt.WhatsAppConfirmed -> {
+                    val verification = otpAuthApi.claimVerification(challenge.challengeId)
+                    check(verification.verificationStatus == "VERIFIED") {
+                        "O TINO não confirmou a posse do WhatsApp."
+                    }
+                    return@withLock authorize(activity, verification.verificationTicket)
+                }
             }
         }
         error("O fluxo OTP terminou sem autenticar.")
+    }
+
+    private suspend fun awaitOtpAttempt(
+        challenge: OtpChallenge,
+        otpCodeProvider: suspend (OtpChallenge) -> OtpCodeAttempt,
+    ): OtpCodeAttempt = coroutineScope {
+        val manual = async { otpCodeProvider(challenge) }
+        val automatic = async { awaitWhatsAppConfirmation(challenge) }
+        val winner = select<Any> {
+            manual.onAwait { it }
+            automatic.onAwait { it }
+        }
+        when (winner) {
+            is OtpCodeAttempt -> {
+                automatic.cancel()
+                winner
+            }
+            AutomaticOtpResult.Confirmed -> {
+                manual.cancel()
+                OtpCodeAttempt.WhatsAppConfirmed
+            }
+            AutomaticOtpResult.Unavailable -> manual.await()
+            else -> error("Resultado OTP desconhecido.")
+        }
+    }
+
+    private suspend fun awaitWhatsAppConfirmation(challenge: OtpChallenge): AutomaticOtpResult {
+        while (currentCoroutineContext().isActive) {
+            val status = runCatching { otpAuthApi.getChallengeStatus(challenge.challengeId) }.getOrNull()
+            if (status != null) {
+                if (status.verificationAvailable && status.status == "VERIFIED") {
+                    return AutomaticOtpResult.Confirmed
+                }
+                if (status.expiresInSeconds <= 0L || status.status in setOf("EXPIRED", "LOCKED", "CONSUMED")) {
+                    return AutomaticOtpResult.Unavailable
+                }
+            }
+            delay(1_500)
+        }
+        return AutomaticOtpResult.Unavailable
+    }
+
+    private enum class AutomaticOtpResult {
+        Confirmed,
+        Unavailable,
     }
 
     private suspend fun authorize(activity: Activity, verificationTicket: String): Result<Unit> {

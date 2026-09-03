@@ -50,6 +50,7 @@ class OidcAuthCoordinator @Inject constructor(
         activity: Activity,
         phone: String,
         otpCodeProvider: suspend (OtpChallenge) -> OtpCodeAttempt,
+        onWhatsAppConfirmed: () -> Unit = {},
     ): Result<Unit> = authMutex.withLock {
         val current = tokenStore.readSession()
         if (current?.accessToken?.isNotBlank() == true &&
@@ -75,6 +76,7 @@ class OidcAuthCoordinator @Inject constructor(
                     check(verification.verificationStatus == "VERIFIED") {
                         "O TINO não confirmou a posse do WhatsApp."
                     }
+                    onWhatsAppConfirmed()
                     return@withLock authorize(activity, verification.verificationTicket)
                 }
             }

@@ -65,6 +65,7 @@ sealed interface OnboardingState {
     data object Idle : OnboardingState
     data object Authenticating : OnboardingState
     data class AwaitingOtp(val challenge: OtpChallenge) : OnboardingState
+    data object WhatsAppConfirmed : OnboardingState
     data object LoadingBusiness : OnboardingState
     data object RegisteringInstallation : OnboardingState
     data object Ready : OnboardingState

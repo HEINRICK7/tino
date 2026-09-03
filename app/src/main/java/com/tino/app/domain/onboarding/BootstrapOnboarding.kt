@@ -27,7 +27,12 @@ class BootstrapOnboarding @Inject constructor(
         onStage: (OnboardingState) -> Unit = {},
     ): OnboardingResult {
         onStage(OnboardingState.Authenticating)
-        auth.login(activity, phone = phone, otpCodeProvider = otpCodeProvider).getOrThrow()
+        auth.login(
+            activity,
+            phone = phone,
+            otpCodeProvider = otpCodeProvider,
+            onWhatsAppConfirmed = { onStage(OnboardingState.WhatsAppConfirmed) },
+        ).getOrThrow()
 
         val installationId = identity.current().installationId
         var context = api.bootstrap(
@@ -82,7 +87,7 @@ class BootstrapOnboarding @Inject constructor(
         auth.login(activity, phone = phone, otpCodeProvider = { challenge ->
             onStage(OnboardingState.AwaitingOtp(challenge))
             otpCodeProvider(challenge)
-        }).getOrThrow()
+        }, onWhatsAppConfirmed = { onStage(OnboardingState.WhatsAppConfirmed) }).getOrThrow()
 
         val installationId = identity.current().installationId
         var context = api.bootstrap()

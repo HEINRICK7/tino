@@ -1089,6 +1089,7 @@ internal fun FirstAccessScreen(
         }
         when (onboardingState) {
             OnboardingState.Authenticating -> Text("Conectando sua conta com o TINO…", color = TinoMuted)
+            OnboardingState.WhatsAppConfirmed -> Text("Acesso confirmado. Continuando com o TINO…", color = TinoMuted)
             is OnboardingState.AwaitingOtp -> Text("Confira seu WhatsApp; o acesso avança automaticamente ou você pode digitar o código.", color = TinoMuted)
             OnboardingState.LoadingBusiness -> Text("Criando o comércio no TINO…", color = TinoMuted)
             OnboardingState.RegisteringInstallation -> Text("Registrando este aparelho…", color = TinoMuted)
@@ -1100,6 +1101,7 @@ internal fun FirstAccessScreen(
         }
         Spacer(Modifier.height(TinoSpacing.lg))
         val onboardingWorking = onboardingState == OnboardingState.Authenticating ||
+            onboardingState == OnboardingState.WhatsAppConfirmed ||
             onboardingState is OnboardingState.AwaitingOtp ||
             onboardingState == OnboardingState.LoadingBusiness ||
             onboardingState == OnboardingState.RegisteringInstallation
@@ -1183,6 +1185,7 @@ internal fun RestoreStoreScreen(
     var submitAttempted by remember { mutableStateOf(false) }
     val phoneDigits = phone.filter(Char::isDigit)
     val onboardingWorking = onboardingState == OnboardingState.Authenticating ||
+        onboardingState == OnboardingState.WhatsAppConfirmed ||
         onboardingState is OnboardingState.AwaitingOtp ||
         onboardingState == OnboardingState.LoadingBusiness ||
         onboardingState == OnboardingState.RegisteringInstallation
@@ -1201,6 +1204,7 @@ internal fun RestoreStoreScreen(
         )
         when (onboardingState) {
             OnboardingState.Authenticating -> Text("Conectando sua conta com o TINO…", color = TinoMuted)
+            OnboardingState.WhatsAppConfirmed -> Text("Acesso confirmado. Continuando com o TINO…", color = TinoMuted)
             is OnboardingState.AwaitingOtp -> Text("Confira seu WhatsApp; o acesso avança automaticamente ou você pode digitar o código.", color = TinoMuted)
             OnboardingState.RegisteringInstallation -> Text("Vinculando este aparelho ao comércio…", color = TinoMuted)
             is OnboardingState.Error -> TinoCard {

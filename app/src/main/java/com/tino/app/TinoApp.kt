@@ -673,6 +673,12 @@ private fun TinoAppContent(
     }
 }
 
+private fun maskOtpPhone(phone: String): String {
+    val digits = phone.filter(Char::isDigit)
+    if (digits.length <= 4) return phone
+    return "•••• ${digits.takeLast(4)}"
+}
+
 private data class PendingOtpPrompt(
     val challenge: OtpChallenge,
     val continuation: CancellableContinuation<OtpCodeAttempt>,
@@ -686,6 +692,7 @@ private fun OtpCodeDialog(
     onResend: () -> Unit,
 ) {
     var code by remember { mutableStateOf("") }
+    var manualEntryVisible by remember(challenge.challengeId) { mutableStateOf(false) }
     var resendInSeconds by remember(challenge.challengeId) {
         mutableStateOf(challenge.resendAvailableInSeconds)
     }
@@ -715,16 +722,34 @@ private fun OtpCodeDialog(
                     },
                     color = TinoMuted,
                 )
-                OutlinedTextField(
-                    value = code,
-                    onValueChange = { value ->
-                        code = value.filter(Char::isDigit).take(6)
-                    },
-                    label = { Text("Código de 6 dígitos") },
-                    singleLine = true,
-                    enabled = !expired,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                )
+                if (!manualEntryVisible && !expired) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(TinoSpacing.xs),
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = TinoGreen,
+                        )
+                        Text("Aguardando confirmação…", color = TinoMuted)
+                    }
+                    TextButton(onClick = { manualEntryVisible = true }) {
+                        Text("DIGITAR CÓDIGO MANUALMENTE")
+                    }
+                }
+                if (manualEntryVisible) {
+                    OutlinedTextField(
+                        value = code,
+                        onValueChange = { value ->
+                            code = value.filter(Char::isDigit).take(6)
+                        },
+                        label = { Text("Código de 6 dígitos") },
+                        singleLine = true,
+                        enabled = !expired,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    )
+                }
             }
         },
         confirmButton = {
@@ -738,7 +763,7 @@ private fun OtpCodeDialog(
         dismissButton = {
             Row {
                 TextButton(onClick = onResend, enabled = resendInSeconds <= 0L) {
-                    Text(if (resendInSeconds > 0L) "REENVIAR (${resendInSeconds}s)" else "REENVIAR")
+                    Text(if (resendInSeconds > 0L) "REENVIAR MENSAGEM (${resendInSeconds}s)" else "REENVIAR MENSAGEM")
                 }
                 TextButton(onClick = onCancel) { Text("CANCELAR") }
             }
@@ -935,6 +960,8 @@ internal fun FirstAccessScreen(
         if (owner.isBlank()) add("seu nome")
         if (phone.isBlank()) add("celular")
     }
+    val phoneLocked = onboardingState is OnboardingState.AwaitingOtp ||
+        onboardingState == OnboardingState.WhatsAppConfirmed
 
     Column(
         modifier = Modifier
@@ -986,11 +1013,12 @@ internal fun FirstAccessScreen(
         )
         Spacer(Modifier.height(TinoSpacing.md))
         TinoTextField(
-            value = phone,
+            value = if (phoneLocked) maskOtpPhone(phone) else phone,
             onValueChange = { phone = it },
             label = "Celular",
             placeholder = "(86) 9 1234-5678",
             labelAbove = true,
+            enabled = !phoneLocked,
         )
         Spacer(Modifier.height(TinoSpacing.md))
         Text("Qual é o seu tipo de negócio?", modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium)
@@ -1184,6 +1212,8 @@ internal fun RestoreStoreScreen(
     var phone by remember { mutableStateOf("") }
     var submitAttempted by remember { mutableStateOf(false) }
     val phoneDigits = phone.filter(Char::isDigit)
+    val phoneLocked = onboardingState is OnboardingState.AwaitingOtp ||
+        onboardingState == OnboardingState.WhatsAppConfirmed
     val onboardingWorking = onboardingState == OnboardingState.Authenticating ||
         onboardingState == OnboardingState.WhatsAppConfirmed ||
         onboardingState is OnboardingState.AwaitingOtp ||
@@ -1196,11 +1226,12 @@ internal fun RestoreStoreScreen(
             Text("Confirme seu celular para localizar o comércio autorizado no TINO.", color = TinoMuted)
         }
         TinoTextField(
-            value = phone,
+            value = if (phoneLocked) maskOtpPhone(phone) else phone,
             onValueChange = { phone = it },
             label = "Celular",
             placeholder = "(86) 9 1234-5678",
             labelAbove = true,
+            enabled = !phoneLocked,
         )
         when (onboardingState) {
             OnboardingState.Authenticating -> Text("Conectando sua conta com o TINO…", color = TinoMuted)

@@ -1454,6 +1454,7 @@ fun TinoTextField(
     placeholder: String? = null,
     modifier: Modifier = Modifier,
     labelAbove: Boolean = false,
+    enabled: Boolean = true,
     leadingIcon: (@Composable () -> Unit)? = null,
     prefix: (@Composable () -> Unit)? = null,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
@@ -1462,6 +1463,7 @@ fun TinoTextField(
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
+            enabled = enabled,
             modifier = modifier.fillMaxWidth().heightIn(min = TinoSize.inputHeight).tinoOccupiedBounds("tino-field:" + label).tinoInteractiveBounds("tino-field:" + label),
             label = if (labelAbove) null else { { Text(label, style = androidx.compose.material3.MaterialTheme.typography.labelMedium) } },
             placeholder = placeholder?.let { text -> { Text(text, style = androidx.compose.material3.MaterialTheme.typography.bodyLarge) } },

@@ -702,15 +702,16 @@ private fun OtpCodeDialog(
     val expired = expiresInSeconds <= 0L
     AlertDialog(
         onDismissRequest = onCancel,
-        title = { Text("Confirme seu celular") },
+        title = { Text("Confira seu WhatsApp") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(TinoSpacing.sm)) {
                 Text(
                     if (expired) {
                         "Este código expirou. Solicite um novo código para continuar."
                     } else {
-                        "Enviamos um código por ${challenge.deliveryChannel.lowercase()}. " +
-                            "Ele expira em ${expiresInSeconds / 60} min ${expiresInSeconds % 60}s."
+                        "Aguardando confirmação no WhatsApp… " +
+                            "Se preferir, digite o código manualmente; ele expira em " +
+                            "${expiresInSeconds / 60} min ${expiresInSeconds % 60}s."
                     },
                     color = TinoMuted,
                 )
@@ -1088,7 +1089,7 @@ internal fun FirstAccessScreen(
         }
         when (onboardingState) {
             OnboardingState.Authenticating -> Text("Conectando sua conta com o TINO…", color = TinoMuted)
-            is OnboardingState.AwaitingOtp -> Text("Digite o código enviado para confirmar seu celular.", color = TinoMuted)
+            is OnboardingState.AwaitingOtp -> Text("Confira seu WhatsApp; o acesso avança automaticamente ou você pode digitar o código.", color = TinoMuted)
             OnboardingState.LoadingBusiness -> Text("Criando o comércio no TINO…", color = TinoMuted)
             OnboardingState.RegisteringInstallation -> Text("Registrando este aparelho…", color = TinoMuted)
             is OnboardingState.Error -> TinoCard {
@@ -1200,7 +1201,7 @@ internal fun RestoreStoreScreen(
         )
         when (onboardingState) {
             OnboardingState.Authenticating -> Text("Conectando sua conta com o TINO…", color = TinoMuted)
-            is OnboardingState.AwaitingOtp -> Text("Digite o código enviado para confirmar seu celular.", color = TinoMuted)
+            is OnboardingState.AwaitingOtp -> Text("Confira seu WhatsApp; o acesso avança automaticamente ou você pode digitar o código.", color = TinoMuted)
             OnboardingState.RegisteringInstallation -> Text("Vinculando este aparelho ao comércio…", color = TinoMuted)
             is OnboardingState.Error -> TinoCard {
                 Text("Não foi possível entrar no comércio", color = TinoRed, fontWeight = FontWeight.SemiBold)

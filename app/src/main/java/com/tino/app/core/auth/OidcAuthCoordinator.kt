@@ -68,12 +68,14 @@ class OidcAuthCoordinator @Inject constructor(
                 OtpCodeAttempt.Resend -> challenge = otpAuthApi.requestChallenge(phone)
                 is OtpCodeAttempt.Submit -> {
                     val verification = otpAuthApi.verifyCode(challenge.challengeId, attempt.code)
-                    check(verification.verificationStatus == "VERIFIED") { "O TINO não confirmou o código." }
+                    check(verification.verificationStatus.isOtpVerifiedStatus()) {
+                        "O TINO não confirmou o código."
+                    }
                     return@withLock authorize(activity, verification.verificationTicket)
                 }
                 OtpCodeAttempt.WhatsAppConfirmed -> {
                     val verification = otpAuthApi.claimVerification(challenge.challengeId)
-                    check(verification.verificationStatus == "VERIFIED") {
+                    check(verification.verificationStatus.isOtpVerifiedStatus()) {
                         "O TINO não confirmou a posse do WhatsApp."
                     }
                     onWhatsAppConfirmed()
@@ -112,10 +114,13 @@ class OidcAuthCoordinator @Inject constructor(
         while (currentCoroutineContext().isActive) {
             val status = runCatching { otpAuthApi.getChallengeStatus(challenge.challengeId) }.getOrNull()
             if (status != null) {
-                if (status.verificationAvailable && status.status == "VERIFIED") {
+                if (status.verificationAvailable && status.status.isOtpVerifiedStatus()) {
                     return AutomaticOtpResult.Confirmed
                 }
-                if (status.expiresInSeconds <= 0L || status.status in setOf("EXPIRED", "LOCKED", "CONSUMED")) {
+                if (status.expiresInSeconds <= 0L || status.status in setOf(
+                        "EXPIRED", "LOCKED", "CONSUMED",
+                        "OTP_EXPIRED", "OTP_RATE_LIMITED", "OTP_CANCELLED", "OTP_FAILED",
+                    )) {
                     return AutomaticOtpResult.Unavailable
                 }
             }
@@ -253,3 +258,5 @@ class OidcAuthCoordinator @Inject constructor(
         val result: CompletableDeferred<Result<Unit>>,
     )
 }
+
+private fun String.isOtpVerifiedStatus(): Boolean = this == "VERIFIED" || this == "OTP_VERIFIED"

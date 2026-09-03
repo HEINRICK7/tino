@@ -35,7 +35,7 @@ class OtpAuthApiContractTest {
             captured = request
             BackendHttpResponse(
                 200,
-                """{"challenge_id":"challenge-1","verification_status":"VERIFIED","verification_ticket":"ticket-1","ticket_expires_in_seconds":60}""",
+                """{"challenge_id":"challenge-1","verification_status":"OTP_VERIFIED","verification_ticket":"ticket-1","ticket_expires_in_seconds":60}""",
             )
         })
 
@@ -45,7 +45,7 @@ class OtpAuthApiContractTest {
         assertEquals("/api/v1/auth/otp/challenges/challenge-1/verify", captured?.path)
         assertEquals("{\"code\":\"123456\"}", captured?.body)
         assertEquals("challenge-1", verification.challengeId)
-        assertEquals("VERIFIED", verification.verificationStatus)
+        assertEquals("OTP_VERIFIED", verification.verificationStatus)
         assertEquals("ticket-1", verification.verificationTicket)
         assertEquals(60L, verification.ticketExpiresInSeconds)
     }
@@ -57,7 +57,7 @@ class OtpAuthApiContractTest {
             captured = request
             BackendHttpResponse(
                 200,
-                """{"challenge_id":"challenge-1","status":"VERIFIED","expires_in_seconds":120,"verification_available":true}""",
+                """{"challenge_id":"challenge-1","status":"OTP_VERIFIED","expires_in_seconds":120,"verification_available":true}""",
             )
         })
 
@@ -66,7 +66,7 @@ class OtpAuthApiContractTest {
         assertEquals("GET", captured?.method)
         assertEquals("/api/v1/auth/otp/challenges/challenge-1", captured?.path)
         assertEquals(null, captured?.body)
-        assertEquals("VERIFIED", status.status)
+        assertEquals("OTP_VERIFIED", status.status)
         assertEquals(120L, status.expiresInSeconds)
         assertTrue(status.verificationAvailable)
     }
@@ -78,7 +78,7 @@ class OtpAuthApiContractTest {
             captured = request
             BackendHttpResponse(
                 200,
-                """{"challenge_id":"challenge-1","verification_status":"VERIFIED","verification_ticket":"ticket-2","ticket_expires_in_seconds":60}""",
+                """{"challenge_id":"challenge-1","verification_status":"OTP_VERIFIED","verification_ticket":"ticket-2","ticket_expires_in_seconds":60}""",
             )
         })
 
